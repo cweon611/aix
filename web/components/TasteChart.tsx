@@ -1,51 +1,80 @@
-import { AXES, AXIS_META, type TasteVector } from "@/lib/types";
+import {
+  CATEGORY_META,
+  RAW_COLOR,
+  SOUP_COLOR,
+  SPICY_COLOR,
+  SPICY_LEVELS,
+  type Food,
+} from "@/lib/types";
 
 /**
- * 5축 미니 막대 차트. 추천 카드마다 붙여 "왜 이게 나왔는지"를 한눈에 보여 준다.
- * 축 색은 취향 입력 슬라이더와 같아서, 사용자가 민 슬라이더와 눈으로 대조된다.
+ * 음식의 지표 네 가지를 배지로 늘어놓는다.
+ *
+ * 예전 5축 막대 차트를 대신한다. 지표가 연속값이 아니라 단계·참거짓이라
+ * 막대보다 "맵기 약간 / 국물 있음 / 익힘 / 해산물"처럼 말로 읽히는 편이
+ * 정확하다.
  */
-export function TasteChart({
-  taste,
-  reference,
-  height = 30,
-}: {
-  taste: TasteVector;
-  /** 사용자의 취향. 주면 각 축 위에 목표선을 겹쳐 그린다. */
-  reference?: TasteVector;
-  height?: number;
-}) {
+export function TasteBadges({ food, compact = false }: { food: Food; compact?: boolean }) {
+  const size = compact ? "text-[11px] px-1.5 py-0.5" : "text-[12px] px-2 py-1";
+
   return (
-    <div className="flex items-end gap-2.5" aria-hidden="true">
-      {AXES.map((axis) => {
-        const meta = AXIS_META[axis];
-        const barHeight = Math.max(4, (taste[axis] / 5) * height);
-        const refOffset =
-          reference !== undefined ? (reference[axis] / 5) * height : null;
-        return (
-          <div key={axis} className="flex flex-col items-center gap-1">
-            <div className="relative" style={{ height, width: 9 }}>
-              <div
-                className="absolute bottom-0 left-0 w-full rounded-full"
-                style={{ height: barHeight, background: meta.color }}
-              />
-              {refOffset !== null && (
-                <div
-                  className="absolute left-[-3px] w-[15px] border-t-2 border-dashed border-ink/45"
-                  style={{ bottom: refOffset }}
-                />
-              )}
-            </div>
-            <span className="text-[10px] font-bold text-fg-muted">
-              {meta.label.slice(0, 1)}
-            </span>
-          </div>
-        );
-      })}
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Badge
+        color={SPICY_COLOR}
+        size={size}
+        muted={food.spicy === 0}
+        label={food.spicy === 0 ? "안 매움" : `맵기 ${spicyLabel(food.spicy)}`}
+      />
+      <Badge
+        color={SOUP_COLOR}
+        size={size}
+        muted={!food.hasSoup}
+        label={food.hasSoup ? "국물 있음" : "국물 없음"}
+      />
+      <Badge
+        color={RAW_COLOR}
+        size={size}
+        muted={!food.isRaw}
+        label={food.isRaw ? "날것" : "익힘"}
+      />
+      {food.mainIngredients.map((category) => (
+        <Badge
+          key={category}
+          color={CATEGORY_META[category].color}
+          size={size}
+          label={`${CATEGORY_META[category].icon} ${category}`}
+        />
+      ))}
     </div>
   );
 }
 
-/** 접근성용 텍스트 대체. 차트는 aria-hidden이므로 이쪽이 스크린리더가 읽는다. */
-export function tasteSummary(taste: TasteVector): string {
-  return AXES.map((axis) => `${AXIS_META[axis].label} ${taste[axis].toFixed(1)}점`).join(", ");
+function spicyLabel(level: number): string {
+  return SPICY_LEVELS.find((l) => l.value === level)?.label ?? "";
+}
+
+function Badge({
+  label,
+  color,
+  size,
+  muted = false,
+}: {
+  label: string;
+  color: string;
+  size: string;
+  /** 해당 없음(안 매움·국물 없음·익힘)은 옅게 두어 있는 쪽이 눈에 띄게 한다. */
+  muted?: boolean;
+}) {
+  return (
+    <span
+      className={`rounded-full font-medium ${size}`}
+      style={
+        muted
+          ? { background: "var(--color-surface-alt)", color: "var(--color-fg-muted)" }
+          : { background: `${color}1a`, color }
+      }
+    >
+      {label}
+    </span>
+  );
 }

@@ -48,52 +48,47 @@ body {
   letter-spacing: -0.01em;
 }
 
-/* 슬라이더 — 브라우저 기본 모양을 지우고 축 색을 그대로 쓴다. */
-input[type="range"].taste-range {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 34px;
-  background: transparent;
-  cursor: pointer;
+/* 선택 칩 — 호버와 선택을 같은 색 언어로 보여 준다.
+   커서를 올리면 그 색이 옅게 미리 깔리고, 고르면 꽉 찬다.
+   그래서 "지금 고르려는 것"과 "이미 고른 것"이 구분된다.
+   포인터가 없는 기기(터치)에서는 호버가 눌린 것처럼 보여 헷갈리므로
+   hover:hover 미디어 쿼리로 마우스가 있을 때만 적용한다. */
+@media (hover: hover) {
+  .option-chip[aria-checked="false"]:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, white);
+    color: var(--accent);
+    transform: translateY(-1px);
+  }
 }
 
-input[type="range"].taste-range::-webkit-slider-runnable-track {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--track-bg);
-}
-
-input[type="range"].taste-range::-moz-range-track {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--track-bg);
-}
-
-input[type="range"].taste-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 26px;
-  height: 26px;
-  margin-top: -9px;
-  border-radius: 999px;
-  background: var(--axis-color);
-  border: 3px solid #fff;
-  box-shadow: 0 2px 8px rgb(28 24 21 / 0.28);
-}
-
-input[type="range"].taste-range::-moz-range-thumb {
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
-  background: var(--axis-color);
-  border: 3px solid #fff;
-  box-shadow: 0 2px 8px rgb(28 24 21 / 0.28);
-}
-
-input[type="range"].taste-range:focus-visible::-webkit-slider-thumb {
-  outline: 3px solid var(--color-ink);
+.option-chip:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.option-chip[aria-checked="true"] {
+  transform: translateY(-1px);
+}
+
+.option-chip:active {
+  transform: translateY(0);
+}
+
+/* 결과 카드 — 커서를 올리면 눌러 볼 수 있는 대상임을 알린다. */
+@media (hover: hover) {
+  .result-card:hover {
+    border-color: var(--color-line-strong);
+    box-shadow: 0 6px 18px rgb(28 24 21 / 0.08);
+    transform: translateY(-2px);
+  }
+}
+
+.result-card {
+  transition:
+    border-color 150ms,
+    box-shadow 150ms,
+    transform 150ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

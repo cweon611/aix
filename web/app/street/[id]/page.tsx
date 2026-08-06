@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { RegionMap, type MapMarker } from "@/components/RegionMap";
-import { TasteChart } from "@/components/TasteChart";
+import { TasteBadges } from "@/components/TasteChart";
 import { findStreet, foods, streets } from "@/lib/data";
 import { streetDisplayName } from "@/lib/korean";
 import {
@@ -145,18 +145,20 @@ export default async function StreetPage({
             {related.slice(0, 6).map((item) => (
               <li
                 key={item.food.id}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3"
+                className="result-card flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3"
               >
                 <div className="min-w-0">
                   <h3 className="font-display truncate text-[17px]">{item.food.name}</h3>
                   <p className="mt-0.5 text-[12px] text-fg-muted">
                     {item.food.ingredient} · 파는 곳 {item.food.restaurantCount}곳
                   </p>
+                  <div className="mt-1.5">
+                    <TasteBadges food={item.food} compact />
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <TasteChart taste={item.food.taste} reference={pref} height={24} />
-                  <span className="font-display text-[18px] text-brand">{item.match}</span>
-                </div>
+                <span className="font-display shrink-0 text-[18px] text-brand">
+                  {item.match}
+                </span>
               </li>
             ))}
           </ul>

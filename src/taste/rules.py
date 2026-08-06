@@ -1,22 +1,21 @@
-"""메뉴명에서 5축 맛 프로파일(맵기·짠맛·국물·식감·향신료)을 산출하는 룰 엔진.
+"""메뉴명에서 취향 지표 네 가지를 산출하는 룰 엔진.
+
+지표
+----
+- spicy            0 안 매움 / 1 약간 / 2 매움 / 3 아주 매움
+- has_soup         국물 요리인가 (True/False)
+- is_raw           날것으로 먹는가 (True/False)
+- main_ingredients 주재료 분류 — 해산물 | 육류 | 채소
+                   대표 재료 하나만 붙이되, 두 계열이 이름에서 맞부딪히면
+                   (전복삼계탕, 낙지불고기, 소고기순두부) 둘 다 붙인다.
 
 설계 원칙
 ---------
-1. 조리법이 국물감·짠맛을 지배하고, 주재료가 식감·향을 지배한다.
-   그래서 축마다 어느 사전을 먼저 볼지 다르게 잡았다.
-2. `soup`(국물)만 앵커 방식이다. 탕/구이처럼 조리법이 정해지면 국물 유무는
-   거의 확정되므로, 델타를 누적하는 대신 가장 강한 앵커 하나를 채택한다.
-   나머지 축은 근거가 쌓일수록 강해지는 성질이라 델타 누적이 맞다.
-3. 신뢰도(confidence)는 "조리법과 주재료를 각각 몇 개나 짚었는가"로 매긴다.
-   0.6 미만은 LLM 재평가 대상이다(llm_refine.py).
+조리법이 국물 유무와 맵기를 결정하고, 재료명이 주재료 분류와 날것 여부를
+결정한다. 그래서 사전을 조리법 계열과 재료 계열로 나눠 두었다.
 
-축 정의 (1~5)
--------------
-- spicy   : 1 안 매움 → 5 아주 매움
-- salty   : 1 심심함 → 5 아주 짬
-- soup    : 1 국물 없음 → 5 국물이 주인공
-- texture : 1 부드럽고 무름 → 5 쫄깃하고 단단함
-- aroma   : 1 향이 순함 → 5 향이 강하고 개성 있음
+신뢰도(confidence)는 "조리법과 재료를 각각 짚었는가"로 매긴다. 0.6 미만은
+사람이 직접 매기는 대상이다(manual_labels.py).
 """
 
 from __future__ import annotations
@@ -25,24 +24,23 @@ import re
 import unicodedata
 from dataclasses import dataclass, asdict
 
-AXES = ("spicy", "salty", "soup", "texture", "aroma")
+# 주재료 분류. "채소"는 식물성 전반(곡물·과일·버섯 포함)을 뜻한다.
+SEAFOOD = "해산물"
+MEAT = "육류"
+VEGGIE = "채소"
+CATEGORIES = (SEAFOOD, MEAT, VEGGIE)
 
-# 1~5 척도를 벗어나는 값이 웹으로 새어나가면 슬라이더가 깨지므로 항상 여기서 자른다.
-SCORE_MIN, SCORE_MAX = 1.0, 5.0
+SPICY_MIN, SPICY_MAX = 0, 3
 
 
 # --------------------------------------------------------------------------
 # 정규화
 # --------------------------------------------------------------------------
 
-# "갈치조림 등", "낙지볶음 외" 처럼 데이터 원본에 붙어 있는 나열 꼬리표.
 _TRAILING_NOISE = re.compile(r"[\s,/·]*(등|외|기타)\s*$")
-# "조림(병어", "활어회(참돔 / 농어 / 우럭 등)" 같은 깨진 괄호 조각.
 _BRACKETS = re.compile(r"[（(\[][^）)\]]*[）)\]]?")
 _PRICE_NOTE = re.compile(r"※.*$")
 _MULTISPACE = re.compile(r"\s+")
-
-# 메뉴명이 아니라 안내문에 가까운 행. 룰을 태우면 오히려 잡음이 되므로 걸러낸다.
 _NOT_A_MENU = re.compile(r"(변동|문의|권장|예약|사전|참고 요망)")
 
 
@@ -55,14 +53,12 @@ def normalize_menu(name: str) -> str:
     text = _BRACKETS.sub(" ", text)
     text = text.replace("ㆍ", " ").replace("·", " ")
     text = _MULTISPACE.sub(" ", text).strip()
-    # 나열 꼬리표는 괄호를 지운 뒤에야 문장 끝에 드러나는 경우가 많다.
     for _ in range(2):
         text = _TRAILING_NOISE.sub("", text).strip()
     return text
 
 
 def is_menu_like(name: str) -> bool:
-    """메뉴명으로 볼 수 있는 문자열인지. 안내문·초장문은 제외한다."""
     text = normalize_menu(name)
     if len(text) < 2 or len(text) > 40:
         return False
@@ -70,7 +66,7 @@ def is_menu_like(name: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# 코스 분류 — 디저트·음료를 식사와 같은 잣대로 재면 맵기 축이 무의미해진다.
+# 코스 — 디저트·음료는 맵기와 국물을 따질 대상이 아니다.
 # --------------------------------------------------------------------------
 
 DRINK_KEYWORDS = (
@@ -82,20 +78,25 @@ DESSERT_KEYWORDS = (
     "빵", "베이글", "도넛", "도나스", "쿠키", "약과", "양갱", "푸딩", "깜빠뉴", "파운드",
     "떡", "개떡", "전병", "스프", "샐러드", "피자", "파스타", "라자냐", "리소토", "돈까스",
 )
-# 위 사전에 걸리지만 실제로는 끼니인 메뉴들. 사전 순서로는 못 풀어서 따로 뺀다.
 _COURSE_OVERRIDE_MEAL = (
     "떡국", "떡갈비", "떡볶이", "물떡", "쌀떡", "치즈떡",
     "죽순떡갈비", "오리떡갈비", "닭떡갈비", "유황오리떡갈비",
-    "전복빵",  # 완도 전복빵은 간식이지만 매장 분류상 식사로 취급되어 온 항목
+)
+# 차·음료 계열인데 위 사전에 안 걸리는 이름들. 룰이 "차"를 못 잡아 식사로
+# 넘기던 항목들이라 따로 적어 둔다.
+_EXPLICIT_DRINKS = (
+    "대추차", "유자차", "생강차", "쑥차", "잎차", "통차", "도라지차", "배차",
+    "오미자", "한라봉", "매실차", "구기자",
 )
 
 
 def classify_course(menu_norm: str) -> str:
     """'식사' | '디저트' | '음료'."""
+    for kw in _EXPLICIT_DRINKS:
+        if kw in menu_norm:
+            return "음료"
     for kw in _COURSE_OVERRIDE_MEAL:
         if kw in menu_norm:
-            if kw == "전복빵":
-                return "디저트"
             return "식사"
     for kw in DRINK_KEYWORDS:
         if kw in menu_norm:
@@ -107,203 +108,258 @@ def classify_course(menu_norm: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# 조리법 사전
+# 국물 — 조리법이 정하고, 가장 강한 신호 하나를 채택한다.
 # --------------------------------------------------------------------------
 
-# soup 앵커: 조리법이 확정되면 국물 유무도 사실상 확정된다.
-SOUP_ANCHORS: dict[str, float] = {
-    # 국물이 주인공
-    "연포탕": 5.0, "매운탕": 5.0, "지리": 5.0, "간국": 5.0, "해신탕": 5.0,
-    "탕": 4.8, "국밥": 4.8, "곰탕": 4.8, "삼계탕": 4.8, "육개장": 4.8,
-    "찌개": 4.5, "전골": 4.5, "샤브": 4.5, "뚝배기": 4.5, "국": 4.5,
-    "칼국수": 4.3, "수제비": 4.3, "라면": 4.3, "짬뽕": 4.3, "국수": 4.0,
-    "죽": 4.0, "쌀국수": 4.3, "물회": 4.0, "냉면": 3.8, "떡국": 4.3,
-    # 국물이 적거나 자작한 정도
-    "조림": 2.6, "찜": 2.4, "볶음": 1.8, "쌈밥": 2.0, "비빔밥": 1.8,
-    "솥밥": 1.8, "덮밥": 2.0, "백반": 3.2, "정식": 3.0, "한정식": 3.0,
-    # 국물 없음
-    "구이": 1.2, "회": 1.1, "무침": 1.3, "전": 1.2, "튀김": 1.1,
-    "숙회": 1.2, "사시미": 1.1, "초밥": 1.1, "보쌈": 1.3, "수육": 1.5,
-    "장": 1.5, "게장": 1.5, "젓갈": 1.2, "탕탕이": 1.2, "호롱": 1.2,
-    "비빔면": 1.5, "쟁반국수": 1.8, "골동면": 1.8, "짜장면": 1.5,
-    "삼합": 1.3, "코스": 2.2, "한상": 3.0, "유비끼": 1.5, "다짐": 1.2,
-}
+SOUP_KEYWORDS = (
+    "연포탕", "매운탕", "지리", "간국", "해신탕", "탕", "국밥", "곰탕", "삼계탕",
+    "육개장", "찌개", "전골", "샤브", "뚝배기", "국", "칼국수", "수제비", "라면",
+    "짬뽕", "쌀국수", "물회", "떡국", "죽", "해장국", "백숙", "곰국",
+)
+# 위 키워드를 품고 있어도 국물 요리가 아닌 것들. "탕탕이"가 대표 사례다.
+NO_SOUP_OVERRIDE = (
+    "탕탕이", "탕수육", "탕평채", "설렁탕면", "국수전골",
+)
+# 이름에 국물 키워드가 없어도 국물이 있는 것.
+EXTRA_SOUP = ("국수", "냉면", "우동", "메밀국수")
+# 국수류 중 비빔은 국물이 없다.
+NOODLE_NO_SOUP = ("비빔", "짜장", "쟁반", "골동면", "초계")
 
-SPICY_DELTAS: dict[str, float] = {
-    "매운": 1.6, "얼큰": 1.6, "고추장": 1.4, "매콤": 1.4, "불닭": 1.8,
-    "아귀찜": 1.6, "매운탕": 1.6, "육개장": 1.4, "짬뽕": 1.2, "떡볶이": 1.4,
-    "볶음": 0.9, "찜": 0.5, "무침": 0.8, "초무침": 0.7, "회무침": 0.8,
-    "양념": 0.9, "김치": 0.7, "묵은지": 0.6, "갓김치": 0.8, "조림": 0.5,
-    "낙지볶음": 1.4, "주꾸미": 1.2, "짱뚱어": 0.5, "칠게장": 0.6,
-    "닭발": 1.6, "곱창": 0.5, "제육": 0.9, "주물럭": 0.8,
-    # 매움을 확실히 끌어내리는 신호
-    "지리": -1.0, "간장": -0.8, "백숙": -0.8, "물회": -0.3, "수육": -0.6,
-    "샤브": -0.8, "죽": -0.8, "된장": -0.4, "순두부": -0.2,
-}
 
-SALTY_DELTAS: dict[str, float] = {
-    "젓갈": 1.8, "젓": 1.2, "장아찌": 1.4, "간장게장": 1.2, "게장": 1.0,
-    "장": 0.7, "조림": 0.9, "된장": 0.8, "청국장": 1.0, "고추장": 0.7,
-    "굴비": 1.2, "자반": 1.2, "묵은지": 0.6, "김치": 0.5, "양념": 0.5,
-    "구이": 0.3, "볶음": 0.4, "국밥": 0.3, "찌개": 0.5,
-    # 심심한 쪽
-    "죽": -1.2, "회": -0.9, "사시미": -0.9, "숙회": -0.7, "물회": -0.4,
-    "백숙": -0.6, "수육": -0.4, "샤브": -0.6, "생": -0.5, "지리": -0.5,
-    "두부": -0.4, "쌀밥": -0.6, "보리밥": -0.5,
-}
+def detect_soup(text: str) -> tuple[bool, bool]:
+    """(국물 여부, 조리법을 짚었는지) 를 돌려준다."""
+    for kw in NO_SOUP_OVERRIDE:
+        if kw in text:
+            return False, True
+    for kw in SOUP_KEYWORDS:
+        if kw in text:
+            return True, True
+    for kw in EXTRA_SOUP:
+        if kw in text:
+            if any(x in text for x in NOODLE_NO_SOUP):
+                return False, True
+            return True, True
+    # 국물이 없다고 확실히 말할 수 있는 조리법
+    for kw in ("구이", "회", "무침", "전", "튀김", "볶음", "찜", "조림", "밥",
+               "정식", "백반", "쌈밥", "보쌈", "수육", "장", "젓갈", "숙회",
+               "사시미", "초밥", "샤브샤브용"):
+        if kw in text:
+            return False, True
+    return False, False
+
 
 # --------------------------------------------------------------------------
-# 주재료 사전 — 식감·향을 결정한다.
+# 맵기 0~3
 # --------------------------------------------------------------------------
 
-# texture: 1 부드러움 ↔ 5 쫄깃/단단. 재료가 정해지면 조리법보다 지배적이다.
-TEXTURE_ANCHORS: dict[str, float] = {
-    # 쫄깃한 쪽
-    "낙지": 4.8, "세발낙지": 4.8, "산낙지": 5.0, "주꾸미": 4.7, "오징어": 4.6,
-    "갑오징어": 4.6, "전복": 4.7, "소라": 4.7, "꼬막": 4.4, "키조개": 4.2,
-    "바지락": 4.0, "홍어": 4.2, "해삼": 4.5, "멍게": 4.0, "문어": 4.6,
-    "곱창": 4.5, "대창": 4.5, "막창": 4.5, "떡": 4.2, "면": 3.8,
-    "죽순": 4.0, "더덕": 4.0, "도토리묵": 3.4, "묵밥": 3.2, "톳": 3.8,
-    "매생이": 2.4, "해초": 3.6, "육회": 3.6, "떡갈비": 3.6, "육전": 3.4,
-    "회": 3.8, "삼겹살": 3.8, "보쌈": 3.6, "튀김": 3.8, "구이": 3.6,
-    # 부드러운 쪽
-    "두부": 1.6, "순두부": 1.2, "죽": 1.2, "푸딩": 1.1, "커스터드": 1.1,
-    "빙수": 1.4, "케이크": 1.5, "라떼": 1.0, "우유": 1.0, "에이드": 1.0,
-    "스무디": 1.2, "젤라또": 1.2, "아이스크림": 1.2, "수정과": 1.0,
-    # 한 글자 키('간', '애')는 간장·애호박까지 잡아 오탐이 나므로 쓰지 않는다.
-    "계란": 1.8, "알탕": 2.0, "홍어애": 1.8, "장어": 2.6, "붕장어": 2.6,
-    "민어": 2.6, "대구": 2.4, "아귀": 2.6, "조기": 2.8, "갈치": 2.6,
-    "고등어": 2.8, "삼치": 2.6, "병어": 2.6, "전어": 3.0, "굴": 2.2,
-    "우럭": 3.0, "농어": 3.2, "도다리": 3.0, "방어": 3.2, "하모": 3.0,
-    "꽃게": 3.4, "게": 3.4, "새우": 3.6, "대하": 3.6,
+SPICY_3 = ("아주 매운", "매운", "얼큰", "불닭", "화끈", "땡초", "청양")
+SPICY_2 = (
+    "고추장", "매콤", "아귀찜", "매운탕", "육개장", "짬뽕", "떡볶이", "낙지볶음",
+    "주꾸미", "볶음", "무침", "양념", "제육", "주물럭", "비빔", "코다리조림",
+    "닭발", "쭈꾸미",
+)
+SPICY_1 = (
+    "김치", "묵은지", "갓김치", "조림", "찜", "초무침", "회무침", "짱뚱어",
+    "칠게장", "낙지전골", "순두부", "청국장",
+)
+# 확실히 맵지 않다고 말할 수 있는 신호. 위 사전에 걸려도 이쪽이 이긴다.
+NOT_SPICY = (
+    "지리", "간장", "백숙", "수육", "샤브", "죽", "구이", "회", "사시미",
+    "숙회", "물회", "전복죽", "곰탕", "설렁", "맑은", "하얀", "초밥",
+)
+
+
+def detect_spicy(text: str, course: str) -> tuple[int, bool]:
+    """(맵기 0~3, 근거를 짚었는지)."""
+    if course in ("디저트", "음료"):
+        return 0, True
+
+    level = None
+    for kw in SPICY_3:
+        if kw in text:
+            level = 3
+            break
+    if level is None:
+        for kw in SPICY_2:
+            if kw in text:
+                level = 2
+                break
+    if level is None:
+        for kw in SPICY_1:
+            if kw in text:
+                level = 1
+                break
+
+    # 맑은 국물·간장 양념 신호가 있으면 한 단계 내린다.
+    if any(kw in text for kw in NOT_SPICY):
+        if level is None:
+            return 0, True
+        return max(0, level - 1), True
+
+    if level is None:
+        return 0, False
+    return level, True
+
+
+# --------------------------------------------------------------------------
+# 날것 여부
+# --------------------------------------------------------------------------
+
+RAW_KEYWORDS = (
+    "회", "사시미", "물회", "탕탕이", "산낙지", "세발낙지", "육회", "생굴",
+    "초밥", "게장", "젓갈", "젓", "홍어", "멍게", "해삼", "기절낙지", "생선회",
+    "활어", "선어", "다짐", "세꼬시", "생물",
+)
+# "회"를 품지만 익힌 것.
+NOT_RAW_OVERRIDE = (
+    "숙회", "회무침전골", "회덮밥탕", "구이", "튀김", "전골", "찜", "탕",
+    "국", "찌개", "볶음", "조림", "샤브", "라면", "죽", "만두",
+)
+# 위 예외에 걸려도 여전히 날것인 조합.
+RAW_STRONG = ("산낙지", "탕탕이", "생굴", "육회", "물회", "사시미", "홍어회", "세꼬시")
+
+
+def detect_raw(text: str, course: str) -> tuple[bool, bool]:
+    """(날것 여부, 근거를 짚었는지)."""
+    if course in ("디저트", "음료"):
+        return False, True
+    for kw in RAW_STRONG:
+        if kw in text:
+            return True, True
+    if any(kw in text for kw in NOT_RAW_OVERRIDE):
+        return False, True
+    for kw in RAW_KEYWORDS:
+        if kw in text:
+            return True, True
+    return False, False
+
+
+# --------------------------------------------------------------------------
+# 주재료 분류
+# --------------------------------------------------------------------------
+
+INGREDIENT_KEYWORDS: dict[str, tuple[str, ...]] = {
+    SEAFOOD: (
+        "세발낙지", "산낙지", "낙지", "전복", "갈치", "꼬막", "새꼬막", "참꼬막",
+        "꽃게", "홍어", "굴비", "보리굴비", "조기", "굴", "아귀", "병어", "바지락",
+        "고등어", "삼치", "붕장어", "장어", "하모", "민어", "키조개", "오징어",
+        "갑오징어", "주꾸미", "쭈꾸미", "새우", "대하", "문어", "우럭", "농어",
+        "도다리", "방어", "전어", "매생이", "톳", "해초", "멸치", "다슬기",
+        "짱뚱어", "대구", "멍게", "해삼", "서대", "코다리", "명태", "미역",
+        # 한 글자 '김'은 김치·김밥까지 잡아 두부김치를 해산물로 만든다.
+        "돌김", "물김", "김가루", "김구이",
+        "백합", "소라", "게장", "칠게", "해물", "해산물", "생선", "회", "우렁이",
+        "우렁", "가리비", "홍합", "대게", "붕어", "메기", "빠가", "미꾸라지", "추어",
+    ),
+    MEAT: (
+        "한우", "소고기", "쇠고기", "돼지고기", "삼겹살", "목살", "차돌", "육회",
+        "오리", "닭", "토종닭", "흑염소", "곱창", "대창", "막창", "떡갈비",
+        "불고기", "제육", "수육", "보쌈", "갈비", "삼계탕", "백숙", "주물럭",
+        "육개장", "고기", "돈까스", "스테이크", "베이컨", "햄", "닭가슴살",
+        "암돼지", "유황오리", "한우암소",
+    ),
+    VEGGIE: (
+        "도토리", "죽순", "애호박", "순두부", "두부", "콩", "나물", "산채", "시금치",
+        "능이", "표고", "버섯", "미나리", "배추", "열무", "시래기", "들깨",
+        "보리", "쌀", "메밀", "우리밀", "감자", "고구마", "옥수수", "단호박",
+        "가지", "토마토", "유자", "매실", "대추", "도라지", "더덕", "쑥",
+        "딸기", "산딸기", "무화과", "배", "사과", "복숭아", "멜론", "팥",
+        "녹두", "마늘", "생강", "곰보배추", "쌈밥", "김치", "묵은지", "고추",
+        "채소", "야채", "흑미", "한라봉", "청포도", "블루베리", "오디", "자두",
+        "석류", "곶감", "밤", "연잎", "바질", "샐러드",
+        # '떡'·'면'·'비빔밥'은 조리 형태이지 재료가 아니다. 넣으면 떡갈비·
+        # 낙지비빔밥까지 채소로 끌려온다.
+    ),
 }
 
-# aroma: 향의 강도. 발효·한약재·허브·향채가 올리고, 유제품·곡물이 내린다.
-AROMA_DELTAS: dict[str, float] = {
-    "홍어": 2.4, "청국장": 2.0, "젓갈": 1.6, "젓": 1.0, "묵은지": 1.0,
-    "갓김치": 1.0, "된장": 0.9, "김치": 0.7, "곰삭": 1.6, "삭힌": 1.6,
-    "들깨": 1.2, "깻잎": 0.9, "쑥": 1.4, "더덕": 1.3, "도라지": 1.1,
-    "미나리": 1.0, "부추": 0.8, "마늘": 0.9, "생강": 1.2, "대추": 0.9,
-    "유자": 1.2, "한라봉": 0.8, "오미자": 1.1, "쌍화": 1.5, "석류": 0.8,
-    "능이": 1.4, "표고": 0.9, "버섯": 0.7, "취": 0.9, "산채": 1.0,
-    "곰보배추": 1.2, "해풍쑥": 1.4, "메밀": 0.7, "고추장": 0.7, "카레": 1.6,
-    "바질": 1.3, "토마토": 0.6, "치즈": 0.8, "레몬머틀": 1.3, "말차": 1.0,
-    "커피": 1.0, "아인슈페너": 1.0, "무화과": 0.7, "복숭아": 0.6,
-    "장어": 0.8, "곱창": 1.2, "대창": 1.2, "오리": 0.9, "흑염소": 1.4,
-    "추어": 1.3, "짱뚱어": 1.3, "다슬기": 0.9, "물회": 0.6,
-    # 향이 순한 쪽
-    "우유": -1.0, "쌀": -0.8, "밥": -0.5, "두부": -0.7, "순두부": -0.7,
-    "죽": -0.6, "떡": -0.5, "옥수수": -0.6, "감자": -0.6, "단호박": -0.4,
-    "푸딩": -0.8, "생크림": -0.8, "딸기": -0.3, "나주배": -0.4, "사과": -0.4,
-}
+
+def detect_ingredients(text: str) -> tuple[list[str], bool]:
+    """(주재료 분류 목록, 근거를 짚었는지).
+
+    두 계열이 이름에서 맞부딪히면 둘 다 남긴다. 전복삼계탕은 해산물이면서
+    육류이고, 사용자가 어느 쪽으로 찾아와도 나와야 맞다.
+    """
+    hits: dict[str, int] = {}
+    for category, keywords in INGREDIENT_KEYWORDS.items():
+        best = 0
+        for kw in keywords:
+            if kw in text:
+                best = max(best, len(kw))
+        if best:
+            hits[category] = best
+
+    if not hits:
+        return [], False
+
+    ranked = sorted(hits.items(), key=lambda kv: -kv[1])
+    top_score = ranked[0][1]
+    chosen = {ranked[0][0]}
+
+    # 두 번째 계열도 이름에서 충분히 뚜렷하면(대표 재료와 같은 급이면) 함께 남긴다.
+    for category, score in ranked[1:]:
+        if score >= top_score - 1:
+            chosen.add(category)
+        if len(chosen) == 2:
+            break
+
+    # 순서를 CATEGORIES 기준으로 고정한다. "해산물;채소"와 "채소;해산물"이
+    # 따로 집계되면 분포를 읽을 수 없다.
+    return [c for c in CATEGORIES if c in chosen], True
 
 
+# --------------------------------------------------------------------------
 @dataclass
 class TasteProfile:
-    spicy: float
-    salty: float
-    soup: float
-    texture: float
-    aroma: float
+    spicy: int
+    has_soup: bool
+    is_raw: bool
+    main_ingredients: list[str]
     course: str
     confidence: float
-    matched_terms: str
 
     def as_dict(self) -> dict:
         return asdict(self)
 
 
-def _clamp(value: float) -> float:
-    return round(min(SCORE_MAX, max(SCORE_MIN, value)), 2)
-
-
-def _collect(text: str, table: dict[str, float]) -> list[tuple[str, float]]:
-    """text 안에 등장하는 사전 항목을 모두 모은다.
-
-    '낙지볶음'처럼 '낙지볶음'과 '볶음'이 동시에 걸리는 겹침이 흔하다. 긴 키를
-    먼저 확정하고, 이미 채택한 키에 포함되는 짧은 키는 이중 계상하지 않는다.
-    """
-    hits: list[tuple[str, float]] = []
-    taken: list[str] = []
-    for key in sorted(table, key=len, reverse=True):
-        if key not in text:
-            continue
-        if any(key in t for t in taken):
-            continue
-        taken.append(key)
-        hits.append((key, table[key]))
-    return hits
-
-
 def score_menu(menu_name: str, ingredient: str = "") -> TasteProfile:
-    """메뉴명(+매칭된 제철 식재료)으로 5축 점수를 낸다.
-
-    ingredient는 seasonal_region_mapping.csv의 match_term이다. 메뉴명이
-    '전복'처럼 짧아 정보가 부족할 때 식감·향의 근거를 보강해 준다.
-    """
+    """메뉴명(+매칭된 제철 식재료)으로 취향 지표를 낸다."""
     menu = normalize_menu(menu_name)
     haystack = f"{menu} {ingredient}".strip()
     course = classify_course(menu)
 
-    method_hits = _collect(haystack, SOUP_ANCHORS)
-    spicy_hits = _collect(haystack, SPICY_DELTAS)
-    salty_hits = _collect(haystack, SALTY_DELTAS)
-    texture_hits = _collect(haystack, TEXTURE_ANCHORS)
-    aroma_hits = _collect(haystack, AROMA_DELTAS)
+    spicy, spicy_sure = detect_spicy(haystack, course)
+    has_soup, soup_sure = detect_soup(haystack)
+    is_raw, raw_sure = detect_raw(haystack, course)
+    ingredients, ing_sure = detect_ingredients(haystack)
 
-    # --- soup: 앵커 중 가장 강한 하나 ---
-    if method_hits:
-        soup = max(v for _, v in method_hits)
-    else:
-        soup = 2.5
     if course in ("디저트", "음료"):
-        # 빙수·라떼에 국물 점수를 주면 '국물 선호' 사용자에게 음료가 올라온다.
-        soup = 1.0
+        has_soup = False
 
-    # --- spicy / salty: 베이스 + 델타 누적 ---
-    spicy = 2.0 + sum(v for _, v in spicy_hits)
-    salty = 3.0 + sum(v for _, v in salty_hits)
-    if course in ("디저트", "음료"):
-        spicy, salty = 1.0, 1.0
-
-    # --- texture: 재료 앵커 평균, 없으면 조리법으로 대충 ---
-    if texture_hits:
-        # 가장 특징적인(=가장 긴 키) 재료에 무게를 더 준다.
-        weights = [len(k) for k, _ in texture_hits]
-        texture = sum(v * w for (_, v), w in zip(texture_hits, weights)) / sum(weights)
-    else:
-        texture = 3.0
-
-    # --- aroma: 베이스 + 델타 ---
-    aroma = 2.0 + sum(v for _, v in aroma_hits)
-
-    # --- 신뢰도 ---
-    # 조리법과 재료를 모두 짚었으면 룰이 제 몫을 한 것으로 본다.
-    has_method = bool(method_hits)
-    has_ingredient = bool(texture_hits or aroma_hits)
-    confidence = 0.30
-    if has_method and has_ingredient:
+    # 맵기와 날것은 "표시가 없으면 아니다"가 맞는 기본값이다. 매운 음식에는
+    # 대개 매움·볶음·양념이 붙고, 날것에는 회·산낙지·게장이 붙는다. 그래서
+    # 키워드를 못 찾은 것 자체를 근거 부족으로 치지 않는다.
+    # 반면 국물 유무는 조리법을 짚어야만 알 수 있어 이쪽만 근거로 센다.
+    _ = (spicy_sure, raw_sure)
+    method_sure = soup_sure
+    if method_sure and ing_sure:
         confidence = 0.85
-    elif has_method or has_ingredient:
+    elif method_sure or ing_sure:
         confidence = 0.55
+    else:
+        confidence = 0.30
+
     if course in ("디저트", "음료"):
-        # 디저트·음료는 맵기/짠맛/국물이 규칙적으로 정해져 불확실성이 작다.
         confidence = max(confidence, 0.70)
     if len(menu) < 3:
         confidence -= 0.15
     if not is_menu_like(menu_name):
         confidence = 0.10
-    confidence = round(min(0.95, max(0.05, confidence)), 2)
-
-    matched = sorted({k for k, _ in (method_hits + texture_hits + aroma_hits)})
 
     return TasteProfile(
-        spicy=_clamp(spicy),
-        salty=_clamp(salty),
-        soup=_clamp(soup),
-        texture=_clamp(texture),
-        aroma=_clamp(aroma),
+        spicy=max(SPICY_MIN, min(SPICY_MAX, spicy)),
+        has_soup=has_soup,
+        is_raw=is_raw,
+        main_ingredients=ingredients,
         course=course,
-        confidence=confidence,
-        matched_terms=";".join(matched),
+        confidence=round(min(0.95, max(0.05, confidence)), 2),
     )

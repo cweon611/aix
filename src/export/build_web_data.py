@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from src.config import DATA_PROCESSED_DIR, ROOT_DIR
-from src.taste.rules import AXES, normalize_menu
+from src.taste.rules import CATEGORIES, normalize_menu
 
 MAPPING = DATA_PROCESSED_DIR / "seasonal_region_mapping.csv"
 PROFILE = DATA_PROCESSED_DIR / "menu_taste_profile.csv"
@@ -77,7 +77,13 @@ def build_foods() -> list[dict]:
         })
 
     foods = []
+    skipped_dessert = 0
     for key, profile in profiles.items():
+        # 디저트는 서비스 대상이 아니다. 취향 지표(맵기·국물·날것·주재료)로
+        # 케이크와 낙지연포탕을 한 줄에 세우는 건 의미가 없다.
+        if profile["course"] == "디저트":
+            skipped_dessert += 1
+            continue
         rows = restaurants.get(key, [])
         # 지역 특산 표시가 붙은 곳을 먼저 보여 준다.
         rows.sort(key=lambda r: (not r["isLocalSpecialty"], r["name"]))
@@ -90,7 +96,12 @@ def build_foods() -> list[dict]:
             "name": profile["menu_norm"],
             "displayName": profile["menu_name"],
             "ingredient": profile["ingredient"],
-            "taste": {axis: float(profile[axis]) for axis in AXES},
+            "spicy": int(profile["spicy"]),
+            "hasSoup": profile["has_soup"] == "Y",
+            "isRaw": profile["is_raw"] == "Y",
+            "mainIngredients": [
+                c for c in (profile["main_ingredients"] or "").split(";") if c
+            ],
             "course": profile["course"],
             "confidence": float(profile["confidence"]),
             "source": profile.get("source", "rule"),
@@ -101,6 +112,8 @@ def build_foods() -> list[dict]:
         })
 
     foods.sort(key=lambda f: (-f["restaurantCount"], f["name"]))
+    if skipped_dessert:
+        print(f"  디저트 {skipped_dessert}건 제외")
     return foods
 
 
@@ -138,7 +151,7 @@ def main() -> None:
         "builtAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "foodCount": len(foods),
         "streetCount": len(streets),
-        "axes": list(AXES),
+        "categories": list(CATEGORIES),
         "sources": [
             "농촌진흥청 농사로 월별 제철 식재료",
             "전남관광플랫폼(J-TaaS)·광주 대표음식 DB",

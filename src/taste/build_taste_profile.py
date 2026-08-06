@@ -1,12 +1,12 @@
-"""seasonal_region_mapping.csv에 룰 엔진을 적용해 메뉴별 맛 프로파일을 만든다.
+"""seasonal_region_mapping.csv에 룰 엔진을 적용해 메뉴별 취향 지표를 만든다.
 
 산출물
 ------
-- data/processed/menu_taste_profile.csv : 고유 메뉴 단위 5축 점수
-- data/processed/review/taste_low_confidence.csv : LLM 재평가 대상(신뢰도 < 0.6)
+- data/processed/menu_taste_profile.csv : 고유 메뉴 단위 지표
+- data/processed/review/taste_low_confidence.csv : 사람이 직접 매길 대상
 
 같은 메뉴명이 여러 식당에 반복되므로 (메뉴명, 식재료) 조합 단위로 한 번만
-점수를 낸다. 웹에서는 이 표를 메뉴명으로 조인해 쓴다.
+매긴다. manual_labels.py가 만든 override가 있으면 자동으로 덮어쓴다.
 
 실행: python -m src.taste.build_taste_profile
 """
@@ -17,36 +17,38 @@ import csv
 from collections import Counter
 
 from src.config import DATA_PROCESSED_DIR, DATA_REVIEW_DIR
-from src.taste.rules import AXES, score_menu, normalize_menu, is_menu_like
+from src.taste.rules import score_menu, normalize_menu, is_menu_like
 
 SOURCE = DATA_PROCESSED_DIR / "seasonal_region_mapping.csv"
 OUTPUT = DATA_PROCESSED_DIR / "menu_taste_profile.csv"
 LOW_CONF = DATA_REVIEW_DIR / "taste_low_confidence.csv"
-# llm_refine.py가 만들어 두면 자동으로 반영된다. 없으면 룰 결과만 쓴다.
-LLM_OVERRIDE = DATA_REVIEW_DIR / "taste_llm_override.csv"
+OVERRIDE = DATA_REVIEW_DIR / "taste_llm_override.csv"
 
 LOW_CONFIDENCE_CUTOFF = 0.60
 
 FIELDS = [
     "menu_key", "menu_name", "menu_norm", "ingredient",
-    *AXES,
-    "course", "confidence", "source", "matched_terms",
+    "spicy", "has_soup", "is_raw", "main_ingredients",
+    "course", "confidence", "source",
     "months", "regions", "restaurant_count",
 ]
 
 
 def _load_overrides() -> dict[str, dict]:
-    if not LLM_OVERRIDE.exists():
+    if not OVERRIDE.exists():
         return {}
-    with LLM_OVERRIDE.open(encoding="utf-8-sig", newline="") as fh:
+    with OVERRIDE.open(encoding="utf-8-sig", newline="") as fh:
         return {row["menu_key"]: row for row in csv.DictReader(fh)}
+
+
+def _as_bool(value: str) -> bool:
+    return str(value).strip().lower() in {"1", "true", "y", "yes", "o"}
 
 
 def main() -> None:
     with SOURCE.open(encoding="utf-8-sig", newline="") as fh:
         rows = list(csv.DictReader(fh))
 
-    # (정규화 메뉴명, 식재료) 단위로 묶는다. 같은 조합이면 맛도 같다고 본다.
     groups: dict[tuple[str, str], dict] = {}
     for row in rows:
         raw_name = (row.get("menu_name") or "").strip()
@@ -54,8 +56,7 @@ def main() -> None:
         if not raw_name or not is_menu_like(raw_name):
             continue
         norm = normalize_menu(raw_name)
-        key = (norm, ingredient)
-        bucket = groups.setdefault(key, {
+        bucket = groups.setdefault((norm, ingredient), {
             "menu_name": raw_name,
             "menu_norm": norm,
             "ingredient": ingredient,
@@ -74,24 +75,30 @@ def main() -> None:
 
     overrides = _load_overrides()
     override_hits = 0
-
     out_rows = []
+
     for (norm, ingredient), bucket in sorted(groups.items()):
         profile = score_menu(bucket["menu_name"], ingredient)
         menu_key = f"{norm}|{ingredient}"
-        scores = {axis: getattr(profile, axis) for axis in AXES}
+
+        spicy = profile.spicy
+        has_soup = profile.has_soup
+        is_raw = profile.is_raw
+        main_ingredients = profile.main_ingredients
         course = profile.course
         confidence = profile.confidence
         source = "rule"
 
         override = overrides.get(menu_key)
         if override:
-            scores = {axis: float(override[axis]) for axis in AXES}
+            spicy = int(override["spicy"])
+            has_soup = _as_bool(override["has_soup"])
+            is_raw = _as_bool(override["is_raw"])
+            main_ingredients = [
+                c for c in (override["main_ingredients"] or "").split(";") if c
+            ]
             course = override["course"]
-            # 사람이든 LLM이든 직접 본 행이므로 신뢰도를 룰 상한선까지 올린다.
             confidence = 0.85
-            # 누가 매겼는지는 뭉뚱그리지 않는다. manual_labels.py는 "manual",
-            # llm_refine.py는 "llm"을 적는다.
             source = override.get("source") or "llm"
             override_hits += 1
 
@@ -100,11 +107,13 @@ def main() -> None:
             "menu_name": bucket["menu_name"],
             "menu_norm": norm,
             "ingredient": ingredient,
-            **scores,
+            "spicy": spicy,
+            "has_soup": "Y" if has_soup else "N",
+            "is_raw": "Y" if is_raw else "N",
+            "main_ingredients": ";".join(main_ingredients),
             "course": course,
             "confidence": confidence,
             "source": source,
-            "matched_terms": profile.matched_terms,
             "months": ";".join(str(m) for m in sorted(bucket["months"])),
             "regions": ";".join(sorted(bucket["regions"])),
             "restaurant_count": len(bucket["restaurants"]),
@@ -116,7 +125,6 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(out_rows)
 
-    # LLM이 이미 덮어쓴 행은 재평가 대상에서 빠진다(source == "llm").
     low = [
         r for r in out_rows
         if r["source"] == "rule" and float(r["confidence"]) < LOW_CONFIDENCE_CUTOFF
@@ -127,19 +135,21 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(low)
 
-    # --- 요약 ---
     print(f"원본 행       : {len(rows)}")
     print(f"고유 메뉴 조합 : {len(out_rows)}")
-    print(f"LLM 보정 적용  : {override_hits}건")
+    print(f"수동 보정 적용 : {override_hits}건")
     print(f"저신뢰(<{LOW_CONFIDENCE_CUTOFF}) : {len(low)}  → {LOW_CONF.name}")
     print(f"저장          : {OUTPUT}")
 
-    course_counts = Counter(r["course"] for r in out_rows)
-    print("\n코스 분포:", dict(course_counts))
-    for axis in AXES:
-        vals = [float(r[axis]) for r in out_rows]
-        print(f"  {axis:8s} 평균 {sum(vals)/len(vals):.2f}  "
-              f"최소 {min(vals):.1f}  최대 {max(vals):.1f}")
+    print("\n코스 :", dict(Counter(r["course"] for r in out_rows)))
+    print("맵기 :", dict(sorted(Counter(r["spicy"] for r in out_rows).items())))
+    print("국물 :", dict(Counter(r["has_soup"] for r in out_rows)))
+    print("날것 :", dict(Counter(r["is_raw"] for r in out_rows)))
+    cats: Counter = Counter()
+    for r in out_rows:
+        labels = [c for c in r["main_ingredients"].split(";") if c]
+        cats[";".join(labels) if labels else "(없음)"] += 1
+    print("주재료:", dict(cats.most_common()))
 
 
 if __name__ == "__main__":

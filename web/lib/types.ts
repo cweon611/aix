@@ -1,21 +1,26 @@
-export const AXES = ["spicy", "salty", "soup", "texture", "aroma"] as const;
-export type Axis = (typeof AXES)[number];
+/** 주재료 분류. "채소"는 식물성 전반(곡물·과일·버섯 포함)을 뜻한다. */
+export const CATEGORIES = ["해산물", "육류", "채소"] as const;
+export type Category = (typeof CATEGORIES)[number];
 
-export type TasteVector = Record<Axis, number>;
-
-/** 축 메타데이터. 색은 Figma의 taste/* 변수와 같은 값이다. */
-export const AXIS_META: Record<
-  Axis,
-  { label: string; low: string; high: string; color: string }
-> = {
-  spicy: { label: "맵기", low: "순한 맛", high: "아주 매움", color: "#C4392A" },
-  salty: { label: "짠맛", low: "심심하게", high: "간이 세게", color: "#2E6E8E" },
-  soup: { label: "국물", low: "없어도 돼요", high: "국물이 주인공", color: "#C8862B" },
-  texture: { label: "식감", low: "부드럽게", high: "쫄깃하게", color: "#6B4A8F" },
-  aroma: { label: "향신료", low: "향은 순하게", high: "향이 강해도", color: "#3E7A3A" },
+export const CATEGORY_META: Record<Category, { label: string; icon: string; color: string }> = {
+  해산물: { label: "해산물", icon: "🐟", color: "#2E6E8E" },
+  육류: { label: "육류", icon: "🥩", color: "#B23A22" },
+  채소: { label: "채소", icon: "🥬", color: "#3E7A3A" },
 };
 
-export type Course = "식사" | "디저트" | "음료";
+/** 맵기 0~3. 라벨은 슬라이더 아래와 결과 카드에서 같은 문구를 쓴다. */
+export const SPICY_LEVELS = [
+  { value: 0, label: "안 매움" },
+  { value: 1, label: "약간" },
+  { value: 2, label: "매움" },
+  { value: 3, label: "아주 매움" },
+] as const;
+
+export const SPICY_COLOR = "#C4392A";
+export const SOUP_COLOR = "#C8862B";
+export const RAW_COLOR = "#6B4A8F";
+
+export type Course = "식사" | "음료";
 
 export interface Restaurant {
   id: string;
@@ -33,11 +38,16 @@ export interface Food {
   name: string;
   displayName: string;
   ingredient: string;
-  taste: TasteVector;
+  /** 0 안 매움 / 1 약간 / 2 매움 / 3 아주 매움 */
+  spicy: number;
+  hasSoup: boolean;
+  isRaw: boolean;
+  /** 대표 주재료. 두 계열이 맞부딪히면 둘 다 들어 있다. */
+  mainIngredients: Category[];
   course: Course;
-  /** 맛 점수의 근거 강도. 룰이 조리법·재료를 모두 짚었으면 0.85. */
+  /** 지표의 근거 강도. 0.6 미만이면 화면에 단서가 약하다고 밝힌다. */
   confidence: number;
-  /** "rule" | "llm" — 점수를 누가 매겼는지. 화면에 배지로 노출한다. */
+  /** "rule" | "manual" — 지표를 누가 매겼는지 */
   source: string;
   months: number[];
   regions: string[];
@@ -69,6 +79,6 @@ export interface Meta {
   builtAt: string;
   foodCount: number;
   streetCount: number;
-  axes: string[];
+  categories: string[];
   sources: string[];
 }
