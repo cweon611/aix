@@ -94,6 +94,13 @@ export function RegionMap({
           const { x, y } = project(m.lat, m.lon);
           const isStreet = m.kind === "street";
           const r = m.highlight ? 9 : isStreet ? 7 : 4.5;
+
+          // 라벨은 기본으로 점 오른쪽에 붙이되, 오른쪽 끝에서 잘릴 것 같으면
+          // 왼쪽으로 넘긴다. 한글은 폭이 거의 글자당 14px이다.
+          const labelWidth = m.label.length * 14 + 18;
+          const flip = x + 12 + labelWidth > W;
+          const labelX = flip ? x - 12 - labelWidth : x + 12;
+
           return (
             <g key={m.id}>
               <circle
@@ -107,20 +114,21 @@ export function RegionMap({
               {m.highlight && (
                 <>
                   <rect
-                    x={x + 12}
+                    x={labelX}
                     y={y - 13}
-                    width={m.label.length * 12 + 16}
+                    width={labelWidth}
                     height={26}
                     rx={13}
                     fill="#1c1815"
                     opacity="0.92"
                   />
                   <text
-                    x={x + 20}
+                    x={labelX + labelWidth / 2}
                     y={y + 5}
                     fill="#fbf8f3"
                     fontSize="14"
                     fontWeight="700"
+                    textAnchor="middle"
                   >
                     {m.label}
                   </text>
