@@ -59,7 +59,7 @@ export default async function ResultPage({
     <main className="mx-auto min-h-dvh w-full max-w-[520px] bg-canvas pb-12">
       <header className="bg-ink px-6 pb-5 pt-11 text-fg-inverse">
         <Link
-          href="/"
+          href="/taste"
           className="block w-fit text-[13px] text-[#b8afa6] transition-colors hover:text-fg-inverse"
         >
           ← 취향 다시 고르기
@@ -169,26 +169,37 @@ export default async function ResultPage({
               위 음식들이 실제로 모여 있는 거리를 득표순으로 모았습니다.
             </p>
             <ol className="mt-3 space-y-2.5">
-              {topStreets.map((agg) => (
+              {topStreets.map((agg, index) => (
                 <li key={agg.street.id}>
                   <Link
                     href={`/street/${agg.street.id}?${preferenceToQuery(pref)}`}
-                    className="result-card block rounded-2xl border border-line bg-surface px-4 py-3.5"
+                    className="street-card flex items-center gap-3 rounded-2xl border-y border-r border-line bg-surface px-4 py-3.5"
                   >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <h3 className="font-display text-[18px]">
-                        {streetDisplayName(agg.street)}
-                      </h3>
-                      <span className="shrink-0 text-[12px] text-fg-muted">
-                        점포 {agg.street.shopCount}곳
-                      </span>
+                    <span className="font-display flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[16px] text-brand">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <h3 className="font-display truncate text-[18px]">
+                          {streetDisplayName(agg.street)}
+                        </h3>
+                        <span className="shrink-0 text-[12px] text-fg-muted">
+                          점포 {agg.street.shopCount}곳
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[12px] text-fg-muted">
+                        {agg.street.sido} {agg.street.sigungu}
+                      </p>
+                      <p className="mt-1.5 truncate text-[12px] text-accent">
+                        {agg.foods.map((f) => f.name).join(" · ")}
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-[12px] text-fg-muted">
-                      {agg.street.sido} {agg.street.sigungu}
-                    </p>
-                    <p className="mt-1.5 text-[12px] text-accent">
-                      {agg.foods.map((f) => f.name).join(" · ")}
-                    </p>
+                    <span
+                      className="street-card-arrow shrink-0 text-[20px] text-fg-muted"
+                      aria-hidden="true"
+                    >
+                      →
+                    </span>
                   </Link>
                 </li>
               ))}
@@ -228,7 +239,7 @@ function EmptyState() {
         다른 달을 골라 보세요.
       </p>
       <Link
-        href="/"
+        href="/taste"
         className="mt-6 inline-block rounded-2xl bg-brand px-6 py-3 text-[15px] font-bold text-fg-inverse transition-all hover:-translate-y-0.5 hover:shadow-lg"
       >
         취향 다시 고르기

@@ -1,3 +1,10 @@
+"use client";
+
+import "leaflet/dist/leaflet.css";
+
+import type L from "leaflet";
+import { useEffect, useRef } from "react";
+
 export interface MapMarker {
   id: string;
   lat: number;
@@ -8,13 +15,36 @@ export interface MapMarker {
   highlight?: boolean;
 }
 
+const STREET_COLOR = "#b23a22";
+const RESTAURANT_COLOR = "#1f5f52";
+
+function buildDivIcon(leaflet: typeof L, color: string, size: number): L.DivIcon {
+  return leaflet.divIcon({
+    className: "region-map-dot",
+    html: `<span style="
+      display:block;width:${size}px;height:${size}px;border-radius:999px;
+      background:${color};border:2px solid #ffffff;
+      box-shadow:0 1px 4px rgba(28,24,21,.35);
+    "></span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
 /**
- * 좌표를 그대로 투영한 SVG 산점도.
+ * OpenStreetMap 타일 위에 마커를 얹은 실제 지도.
  *
- * 지도 타일 서비스를 쓰지 않는 이유: 카카오·네이버 지도는 API 키가 필요하고,
- * OSM 타일은 외부 네트워크에 의존한다. 여기서 필요한 건 "어디쯤 모여 있는가"
- * 하나뿐이라, 좌표만으로 그리는 편이 키도 네트워크도 없이 정확하다.
- * 실제 길찾기는 각 항목의 외부 지도 링크가 맡는다.
+ * 이전 버전은 좌표를 SVG 격자에 직접 투영해 점만 찍었다 — 도로도 지형도
+ * 없이 회색 배경에 점이 떠 있는 모양이라 "지도가 안 보인다"는 게 정확한
+ * 지적이었다. 카카오·네이버 지도는 API 키가 필요해서, 키 없이 쓸 수 있는
+ * OSM 표준 타일로 바꿨다.
+ *
+ * `leaflet`은 모듈 최상단에서 `window`를 참조하기 때문에 Next.js의
+ * 서버 렌더 단계에서 그냥 import하면 "window is not defined"로 죽는다.
+ * useEffect 안에서 동적 import로 불러와, 브라우저에서만 로드되게 한다.
+ * react-leaflet 같은 래퍼를 쓰지 않는 이유도 같다 — React 19와의 peer
+ * dependency 호환 범위가 자주 바뀌어서, 배포 시점에 버전이 어긋나는
+ * 리스크를 지고 싶지 않았다.
  */
 export function RegionMap({
   markers,
@@ -23,9 +53,84 @@ export function RegionMap({
   markers: MapMarker[];
   height?: number;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+
   const points = markers.filter(
     (m) => Number.isFinite(m.lat) && Number.isFinite(m.lon),
   );
+  // effect 의존성은 좌표·강조 여부로만 비교한다. markers는 매 렌더 새
+  // 배열이라 참조로 비교하면 지도가 매번 다시 만들어져 깜빡인다.
+  const pointsKey = points.map((p) => `${p.id}:${p.lat}:${p.lon}:${p.highlight}`).join("|");
+
+  useEffect(() => {
+    if (!containerRef.current || points.length === 0) return;
+
+    let cancelled = false;
+    let map: L.Map | undefined;
+
+    import("leaflet").then((leafletModule) => {
+      if (cancelled || !containerRef.current) return;
+      const leaflet = leafletModule.default;
+
+      map = leaflet.map(containerRef.current, {
+        scrollWheelZoom: false, // 페이지를 스크롤하다 지도 위에서 확대되는 사고를 막는다
+        attributionControl: true,
+        zoomControl: true,
+      });
+      mapRef.current = map;
+
+      leaflet
+        .tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        })
+        .addTo(map);
+
+      const layerGroup = leaflet.layerGroup().addTo(map);
+
+      // 강조 마커를 마지막에 그려 다른 점 위로 올린다.
+      const ordered = [...points].sort(
+        (a, b) => Number(Boolean(a.highlight)) - Number(Boolean(b.highlight)),
+      );
+
+      for (const m of ordered) {
+        const isStreet = m.kind === "street";
+        const color = isStreet ? STREET_COLOR : RESTAURANT_COLOR;
+        const size = m.highlight ? 20 : isStreet ? 15 : 10;
+        const marker = leaflet.marker([m.lat, m.lon], {
+          icon: buildDivIcon(leaflet, color, size),
+        });
+        marker.addTo(layerGroup);
+
+        if (m.highlight) {
+          marker.bindTooltip(m.label, {
+            permanent: true,
+            direction: "top",
+            offset: [0, -size / 2 - 4],
+            className: "region-map-label",
+          });
+        } else {
+          marker.bindTooltip(m.label, { direction: "top" });
+        }
+      }
+
+      if (points.length === 1) {
+        map.setView([points[0].lat, points[0].lon], 14);
+      } else {
+        const bounds = leaflet.latLngBounds(points.map((p) => [p.lat, p.lon]));
+        map.fitBounds(bounds, { padding: [32, 32], maxZoom: 15 });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      map?.remove();
+      mapRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pointsKey가 실질적인 의존성이다.
+  }, [pointsKey]);
 
   if (points.length === 0) {
     return (
@@ -38,105 +143,16 @@ export function RegionMap({
     );
   }
 
-  const lats = points.map((p) => p.lat);
-  const lons = points.map((p) => p.lon);
-  // 점이 하나뿐이면 폭이 0이 되어 나눗셈이 깨진다. 최소 범위를 준다.
-  const pad = 0.06;
-  const minLat = Math.min(...lats) - pad;
-  const maxLat = Math.max(...lats) + pad;
-  const minLon = Math.min(...lons) - pad;
-  const maxLon = Math.max(...lons) + pad;
-
-  const W = 600;
-  const H = Math.max(160, height);
-  // 위도가 올라갈수록 경도 1도의 실제 거리가 줄어든다. 중위도 기준으로 보정.
-  const midLat = (minLat + maxLat) / 2;
-  const lonScale = Math.cos((midLat * Math.PI) / 180);
-
-  const spanLon = (maxLon - minLon) * lonScale;
-  const spanLat = maxLat - minLat;
-  const scale = Math.min(W / spanLon, H / spanLat);
-  const offsetX = (W - spanLon * scale) / 2;
-  const offsetY = (H - spanLat * scale) / 2;
-
-  const project = (lat: number, lon: number) => ({
-    x: offsetX + (lon - minLon) * lonScale * scale,
-    // SVG는 y가 아래로 자라므로 위도를 뒤집는다.
-    y: offsetY + (maxLat - lat) * scale,
-  });
-
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      className="w-full rounded-2xl border border-line"
-      style={{ height, background: "#dbe2de" }}
+    <div
+      ref={containerRef}
+      style={{ height }}
+      // isolate: Leaflet이 내부 pane에 박아 두는 z-index(200~700)가
+      // 페이지의 다른 요소와 충돌하지 않게 이 지도만의 stacking context로
+      // 가둔다. 랜딩 페이지 배경 지도에서 버튼 클릭이 막힌 원인이었다.
+      className="isolate w-full overflow-hidden rounded-2xl border border-line"
       role="img"
       aria-label={`추천 지점 ${points.length}곳의 위치 지도`}
-    >
-      <defs>
-        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path
-            d="M 40 0 L 0 0 0 40"
-            fill="none"
-            stroke="#ffffff"
-            strokeWidth="1"
-            opacity="0.45"
-          />
-        </pattern>
-      </defs>
-      <rect width={W} height={H} fill="url(#grid)" />
-
-      {points
-        // 강조 마커를 마지막에 그려 다른 점 위로 올린다.
-        .slice()
-        .sort((a, b) => Number(Boolean(a.highlight)) - Number(Boolean(b.highlight)))
-        .map((m) => {
-          const { x, y } = project(m.lat, m.lon);
-          const isStreet = m.kind === "street";
-          const r = m.highlight ? 9 : isStreet ? 7 : 4.5;
-
-          // 라벨은 기본으로 점 오른쪽에 붙이되, 오른쪽 끝에서 잘릴 것 같으면
-          // 왼쪽으로 넘긴다. 한글은 폭이 거의 글자당 14px이다.
-          const labelWidth = m.label.length * 14 + 18;
-          const flip = x + 12 + labelWidth > W;
-          const labelX = flip ? x - 12 - labelWidth : x + 12;
-
-          return (
-            <g key={m.id}>
-              <circle
-                cx={x}
-                cy={y}
-                r={r}
-                fill={isStreet ? "#b23a22" : "#1f5f52"}
-                stroke="#ffffff"
-                strokeWidth={m.highlight ? 3 : 2}
-              />
-              {m.highlight && (
-                <>
-                  <rect
-                    x={labelX}
-                    y={y - 13}
-                    width={labelWidth}
-                    height={26}
-                    rx={13}
-                    fill="#1c1815"
-                    opacity="0.92"
-                  />
-                  <text
-                    x={labelX + labelWidth / 2}
-                    y={y + 5}
-                    fill="#fbf8f3"
-                    fontSize="14"
-                    fontWeight="700"
-                    textAnchor="middle"
-                  >
-                    {m.label}
-                  </text>
-                </>
-              )}
-            </g>
-          );
-        })}
-    </svg>
+    />
   );
 }

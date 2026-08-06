@@ -1,45 +1,55 @@
+import Link from "next/link";
+
+import { HeroMap } from "@/components/HeroMap";
 import { meta } from "@/lib/data";
-import { TasteForm } from "./TasteForm";
 
-const MONTH_NAMES = [
-  "1월", "2월", "3월", "4월", "5월", "6월",
-  "7월", "8월", "9월", "10월", "11월", "12월",
-];
-
-export default function HomePage() {
-  const now = new Date();
-  const month = now.getMonth() + 1;
-
+/**
+ * 시작 화면. 취향 입력 폼(/taste)으로 들어가기 전의 짧은 인트로다.
+ *
+ * "전라맛도" 뒤에 광주·전남 전역 지도를 배경으로 깔아 이 서비스가 다루는
+ * 지역을 한눈에 보여준다. 지도는 상호작용이 꺼진 채 배경으로만 존재하고,
+ * 실제 취향 선택은 다음 화면(/taste)에서 이뤄진다.
+ */
+export default function LandingPage() {
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-[520px] bg-canvas">
-      <header className="bg-ink px-6 pb-7 pt-12 text-fg-inverse">
-        <p className="text-[11px] font-bold tracking-[0.14em] text-brand-soft">
-          전라맛도
-        </p>
-        <h1 className="font-display mt-2 text-[28px] leading-tight">
-          오늘 당신의 입맛은
-          <br />
-          어느 쪽입니까
-        </h1>
-        <p className="mt-3 text-[13px] leading-relaxed text-[#b8afa6]">
-          당신의 취향에 맞는 남도 음식을 찾아드립니다.
-        </p>
-      </header>
+    <main className="relative isolate mx-auto min-h-dvh w-full max-w-[520px] overflow-hidden bg-ink">
+      {/* isolate로 이 main을 새 stacking context 루트로 만든다. Leaflet은
+          내부 pane에 z-index 200~700을 박아 두는데, 격리하지 않으면 그
+          값이 문서 레벨로 새어나가 아래의 버튼보다 위에 그려져 클릭을
+          가로챈다. pointer-events-none도 같이 줘서 애초에 배경이 마우스
+          이벤트를 받지 않게 한다. */}
+      <HeroMap className="absolute inset-0 -z-10 pointer-events-none" />
 
-      <TasteForm defaultMonth={month} monthNames={MONTH_NAMES} />
+      {/* 지도 위에 어두운 그라디언트를 깔아 흰 글자가 어디서든 읽히게 한다. */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-ink/75 via-ink/55 to-ink/90" />
 
-      <footer className="px-6 pb-10 text-[11px] leading-relaxed text-fg-muted">
-        <p className="font-bold text-fg">데이터 출처</p>
-        <ul className="mt-1.5 space-y-0.5">
-          {meta.sources.map((s) => (
-            <li key={s}>· {s}</li>
-          ))}
-        </ul>
-        <p className="mt-2">
-          음식 {meta.foodCount}건 · 특화거리 {meta.streetCount}건 ·{" "}
-          {meta.builtAt.slice(0, 10)} 기준
+      <div className="relative z-10 flex min-h-dvh flex-col justify-between px-8 py-14">
+        <p className="text-[12px] font-bold tracking-[0.2em] text-brand-soft">
+          광주 · 전남 제철 미식
         </p>
-      </footer>
+
+        <div className="text-center">
+          <h1 className="font-display text-[64px] leading-none text-fg-inverse drop-shadow-lg">
+            전라맛도
+          </h1>
+          <p className="mt-4 text-[15px] leading-relaxed text-[#e4dccf]">
+            취향 네 가지로 찾는 남도 음식,
+            <br />그 음식이 모여 있는 지역특화거리까지.
+          </p>
+        </div>
+
+        <div>
+          <Link
+            href="/taste"
+            className="block w-full cursor-pointer rounded-2xl bg-brand py-4 text-center text-[17px] font-bold text-fg-inverse shadow-lg transition-all duration-150 hover:-translate-y-0.5 hover:opacity-90 hover:shadow-xl active:translate-y-0"
+          >
+            시작하기
+          </Link>
+          <p className="mt-4 text-center text-[11px] text-[#b8afa6]">
+            음식 {meta.foodCount}건 · 특화거리 {meta.streetCount}건
+          </p>
+        </div>
+      </div>
     </main>
   );
 }

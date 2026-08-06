@@ -1,3 +1,4 @@
+import { getKstMonth } from "./kst";
 import { CATEGORIES, type Category, type Food, type Street } from "./types";
 
 /** 국물 선호. 1은 "상관없음"이라 점수에 영향을 주지 않는다. */
@@ -16,12 +17,15 @@ export interface Preference {
   month: number;
 }
 
-export const DEFAULT_PREFERENCE: Preference = {
+// month는 여기 두지 않는다. 모듈 top-level 상수로 박아 두면 서버리스
+// 함수가 warm 상태로 재사용되는 동안 콜드스타트 시점의 달에 고정되어,
+// 자정을 넘겨도 값이 안 바뀌는 버그가 난다. 쓰는 자리마다 getKstMonth()를
+// 직접 호출하게 해서 항상 요청 시점 값을 쓰도록 강제한다.
+export const DEFAULT_PREFERENCE: Omit<Preference, "month"> = {
   spicy: 1,
   soup: 1,
   raw: "X",
   ingredient: "상관없음",
-  month: new Date().getMonth() + 1,
 };
 
 export const SOUP_OPTIONS: { value: SoupPreference; label: string }[] = [
@@ -359,7 +363,7 @@ export function preferenceFromQuery(
   const month =
     Number.isFinite(monthRaw) && monthRaw >= 1 && monthRaw <= 12
       ? Math.round(monthRaw)
-      : DEFAULT_PREFERENCE.month;
+      : getKstMonth();
 
   return { spicy, soup, raw, ingredient, month };
 }

@@ -91,6 +91,82 @@ body {
     transform 150ms;
 }
 
+/* Leaflet 지도 — 브랜드 톤에 맞춘다.
+   기본 div-icon은 흰 배경 박스를 그려서 우리 원형 마커 뒤에 네모가
+   비친다. 배경과 테두리를 지워 마커 모양만 남긴다. */
+.region-map-dot {
+  background: transparent !important;
+  border: none !important;
+}
+
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: #dbe2de;
+}
+
+/* 강조 마커 라벨을 이전 SVG 버전과 같은 어두운 알약 모양으로 맞춘다. */
+.region-map-label {
+  background: var(--color-ink) !important;
+  color: var(--color-fg-inverse) !important;
+  border: none !important;
+  border-radius: 999px !important;
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgb(28 24 21 / 0.25) !important;
+}
+
+.region-map-label::before {
+  display: none; /* 기본 말풍선 꼬리표를 없애 알약 모양을 깔끔히 유지한다 */
+}
+
+.leaflet-tooltip:not(.region-map-label) {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-fg);
+  border-radius: 8px;
+}
+
+.leaflet-control-attribution {
+  font-size: 9px !important;
+}
+
+/* 특화거리 카드 — 커서를 올리면 좌측 색 바가 두꺼워지고 배경이 옅게
+   물들어, 기존의 그림자만 살짝 지는 것보다 훨씬 뚜렷하게 반응을 보여 준다. */
+.street-card {
+  position: relative;
+  border-left: 4px solid var(--color-line);
+  transition:
+    border-left-color 150ms,
+    background-color 150ms,
+    transform 150ms,
+    box-shadow 150ms;
+}
+
+.street-card .street-card-arrow {
+  transition:
+    transform 150ms,
+    color 150ms;
+}
+
+@media (hover: hover) {
+  .street-card:hover {
+    border-left-color: var(--color-brand);
+    background-color: var(--color-brand-soft);
+    box-shadow: 0 8px 20px rgb(28 24 21 / 0.1);
+    transform: translateY(-2px);
+  }
+
+  .street-card:hover .street-card-arrow {
+    transform: translateX(4px);
+    color: var(--color-brand);
+  }
+}
+
+.street-card:active {
+  transform: translateY(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
