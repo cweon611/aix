@@ -140,7 +140,17 @@ function diversifyByIngredient(scored: ScoredFood[], limit: number): ScoredFood[
   const overflow: ScoredFood[] = [];
   const seen = new Map<string, number>();
 
-  for (const item of scored) {
+  // 같은 메뉴가 재료만 다르게 두 번 들어와 있는 경우가 있다. 원본에서
+  // "우렁이 쌈밥 정식, 전복들깨탕"이 들깨 행과 전복 행으로 각각 잡히는 식이다.
+  // 사용자에겐 같은 요리이므로 점수가 높은 쪽 하나만 남긴다.
+  const seenNames = new Set<string>();
+  const deduped = scored.filter((item) => {
+    if (seenNames.has(item.food.name)) return false;
+    seenNames.add(item.food.name);
+    return true;
+  });
+
+  for (const item of deduped) {
     const key = item.food.ingredient || item.food.name;
     const count = seen.get(key) ?? 0;
     if (count < MAX_PER_INGREDIENT && taken.length < limit) {
