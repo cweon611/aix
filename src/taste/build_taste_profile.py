@@ -88,9 +88,11 @@ def main() -> None:
         if override:
             scores = {axis: float(override[axis]) for axis in AXES}
             course = override["course"]
-            # LLM이 본 행은 룰이 자신 없던 행이므로, 신뢰도를 룰 상한선까지 올린다.
+            # 사람이든 LLM이든 직접 본 행이므로 신뢰도를 룰 상한선까지 올린다.
             confidence = 0.85
-            source = "llm"
+            # 누가 매겼는지는 뭉뚱그리지 않는다. manual_labels.py는 "manual",
+            # llm_refine.py는 "llm"을 적는다.
+            source = override.get("source") or "llm"
             override_hits += 1
 
         out_rows.append({
