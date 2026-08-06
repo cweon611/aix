@@ -14,7 +14,6 @@ export interface Preference {
   raw: RawPreference;
   ingredient: IngredientPreference;
   month: number;
-  course: "식사" | "음료" | "전체";
 }
 
 export const DEFAULT_PREFERENCE: Preference = {
@@ -23,7 +22,6 @@ export const DEFAULT_PREFERENCE: Preference = {
   raw: "X",
   ingredient: "상관없음",
   month: new Date().getMonth() + 1,
-  course: "식사",
 };
 
 export const SOUP_OPTIONS: { value: SoupPreference; label: string }[] = [
@@ -121,11 +119,6 @@ function describeMismatches(pref: Preference, food: Food): string[] {
   return notes;
 }
 
-function matchesCourse(food: Food, course: Preference["course"]): boolean {
-  if (course === "전체") return true;
-  return food.course === course;
-}
-
 /**
  * 제철(월) → 코스 순으로 거르고 취향 일치도로 정렬한다.
  * 해당 월 결과가 너무 적으면 앞뒤 한 달까지 넓힌다. 제철이 아닌 것을
@@ -134,7 +127,8 @@ function matchesCourse(food: Food, course: Preference["course"]): boolean {
 export function recommendFoods(foods: Food[], pref: Preference, limit = 4): ScoredFood[] {
   const neighbours = [((pref.month + 10) % 12) + 1, pref.month, (pref.month % 12) + 1];
 
-  const pool = foods.filter((f) => matchesCourse(f, pref.course));
+  // 데이터에 식사만 남아 있어 코스로 거를 것이 없다.
+  const pool = foods;
   const strict = pool.filter((f) => f.months.includes(pref.month));
   const relaxed = pool.filter((f) => f.months.some((m) => neighbours.includes(m)));
   const candidates = strict.length >= 8 ? strict : relaxed;
@@ -332,7 +326,6 @@ export function preferenceToQuery(pref: Preference): string {
   params.set("raw", pref.raw);
   params.set("ing", pref.ingredient);
   params.set("month", String(pref.month));
-  params.set("course", pref.course);
   return params.toString();
 }
 
@@ -368,9 +361,5 @@ export function preferenceFromQuery(
       ? Math.round(monthRaw)
       : DEFAULT_PREFERENCE.month;
 
-  const courseValue = read("course");
-  const course: Preference["course"] =
-    courseValue === "음료" || courseValue === "전체" ? courseValue : "식사";
-
-  return { spicy, soup, raw, ingredient, month, course };
+  return { spicy, soup, raw, ingredient, month };
 }

@@ -20,7 +20,8 @@ export const SPICY_COLOR = "#C4392A";
 export const SOUP_COLOR = "#C8862B";
 export const RAW_COLOR = "#6B4A8F";
 
-export type Course = "식사" | "음료";
+/** 디저트·음료는 데이터 단계에서 걸러져 식사만 남는다. */
+export type Course = "식사";
 
 export interface Restaurant {
   id: string;

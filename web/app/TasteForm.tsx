@@ -18,8 +18,6 @@ import {
 } from "@/lib/recommend";
 import { CATEGORY_META, RAW_COLOR, SOUP_COLOR, type Category } from "@/lib/types";
 
-const COURSES: Preference["course"][] = ["식사", "음료", "전체"];
-
 export function TasteForm({
   defaultMonth,
   monthNames,
@@ -86,7 +84,7 @@ export function TasteForm({
         />
       </div>
 
-      <div className="mt-4 space-y-5 rounded-2xl border border-line bg-surface-alt px-4 py-5">
+      <div className="mt-4 rounded-2xl border border-line bg-surface-alt px-4 py-5">
         <OptionGroup<string>
           legend="언제 드실 건가요"
           columns={6}
@@ -95,14 +93,6 @@ export function TasteForm({
             setPref((p) => ({ ...p, month: monthNames.indexOf(name) + 1 }))
           }
           options={monthNames.map((name) => ({ value: name, label: name }))}
-        />
-
-        <OptionGroup<Preference["course"]>
-          legend="무엇을 찾고 계신가요"
-          columns={3}
-          value={pref.course}
-          onChange={(course) => setPref((p) => ({ ...p, course }))}
-          options={COURSES.map((course) => ({ value: course, label: course }))}
         />
       </div>
 

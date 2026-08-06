@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import csv
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 from src.config import DATA_PROCESSED_DIR, ROOT_DIR
@@ -77,12 +77,12 @@ def build_foods() -> list[dict]:
         })
 
     foods = []
-    skipped_dessert = 0
+    skipped = Counter()
     for key, profile in profiles.items():
-        # 디저트는 서비스 대상이 아니다. 취향 지표(맵기·국물·날것·주재료)로
-        # 케이크와 낙지연포탕을 한 줄에 세우는 건 의미가 없다.
-        if profile["course"] == "디저트":
-            skipped_dessert += 1
+        # 디저트·음료는 서비스 대상이 아니다. 취향 지표(맵기·국물·날것·주재료)로
+        # 대추차와 낙지연포탕을 한 줄에 세우는 건 의미가 없다. 식사만 남긴다.
+        if profile["course"] != "식사":
+            skipped[profile["course"]] += 1
             continue
         rows = restaurants.get(key, [])
         # 지역 특산 표시가 붙은 곳을 먼저 보여 준다.
@@ -112,8 +112,8 @@ def build_foods() -> list[dict]:
         })
 
     foods.sort(key=lambda f: (-f["restaurantCount"], f["name"]))
-    if skipped_dessert:
-        print(f"  디저트 {skipped_dessert}건 제외")
+    for course, count in skipped.items():
+        print(f"  {course} {count}건 제외")
     return foods
 
 
