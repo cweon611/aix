@@ -1,15 +1,15 @@
 import Link from "next/link";
 
-import { RegionMap, type MapMarker } from "@/components/RegionMap";
-import { TasteBadges } from "@/components/TasteChart";
+import { FoodRecommendations } from "@/components/FoodRecommendations";
+import { type MapMarker } from "@/components/RegionMap";
 import { foods, streets } from "@/lib/data";
 import { streetDisplayName } from "@/lib/korean";
 import {
   aggregateStreets,
-  matchStreets,
   preferenceFromQuery,
   preferenceToQuery,
-  recommendFoods,
+  rankCandidates,
+  toNearbyCandidates,
 } from "@/lib/recommend";
 import { CATEGORY_META, RAW_COLOR, SOUP_COLOR, SPICY_COLOR, SPICY_LEVELS } from "@/lib/types";
 
@@ -23,35 +23,25 @@ export default async function ResultPage({
 }) {
   const query = await searchParams;
   const pref = preferenceFromQuery(query);
-  const scored = recommendFoods(foods, pref, FOOD_LIMIT);
-  const topStreets = aggregateStreets(scored, streets, 4);
 
-  const markers: MapMarker[] = [];
-  topStreets.forEach((agg, index) => {
-    if (agg.street.lat !== null && agg.street.lon !== null) {
-      markers.push({
-        id: agg.street.id,
-        lat: agg.street.lat,
-        lon: agg.street.lon,
-        label: streetDisplayName(agg.street),
-        kind: "street",
-        highlight: index === 0,
-      });
-    }
-  });
-  scored.forEach((item) => {
-    item.food.restaurants.forEach((r) => {
-      if (r.lat !== null && r.lon !== null) {
-        markers.push({
-          id: `${item.food.id}-${r.id}`,
-          lat: r.lat,
-          lon: r.lon,
-          label: r.name,
-          kind: "restaurant",
-        });
-      }
-    });
-  });
+  // 제철 후보를 전부 취향순으로 세워 클라이언트로 넘긴다. 상위 몇 개만
+  // 넘기면 "가까운 순"이 취향으로 한 번 거른 뒤의 순서가 되어 버린다.
+  const ranked = rankCandidates(foods, pref);
+  const candidates = toNearbyCandidates(ranked, streets, FOOD_LIMIT);
+  const topStreets = aggregateStreets(ranked.slice(0, FOOD_LIMIT), streets, 4);
+
+  // 특화거리 마커는 취향 기준으로 고정한다. 아래 "가 볼 만한 특화거리"
+  // 절과 같은 목록이어야 지도와 목록이 서로를 설명한다.
+  const streetMarkers: MapMarker[] = topStreets
+    .filter((agg) => agg.street.lat !== null && agg.street.lon !== null)
+    .map((agg, index) => ({
+      id: agg.street.id,
+      lat: agg.street.lat as number,
+      lon: agg.street.lon as number,
+      label: streetDisplayName(agg.street),
+      kind: "street" as const,
+      highlight: index === 0,
+    }));
 
   const spicyLabel = SPICY_LEVELS.find((l) => l.value === pref.spicy)?.label ?? "";
 
@@ -65,7 +55,7 @@ export default async function ResultPage({
           ← 취향 다시 고르기
         </Link>
         <h1 className="font-display mt-2 text-[26px] leading-tight">
-          {pref.month}월의 남도, {scored.length}가지
+          {pref.month}월의 남도, {Math.min(ranked.length, FOOD_LIMIT)}가지
         </h1>
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Chip color={SPICY_COLOR} label={`맵기 ${spicyLabel}`} />
@@ -87,86 +77,21 @@ export default async function ResultPage({
         </div>
       </header>
 
-      {scored.length === 0 ? (
+      {ranked.length === 0 ? (
         <EmptyState />
       ) : (
         <>
-          <section className="px-5 pt-4">
-            <h2 className="mb-2 text-[13px] font-bold text-fg-muted">추천 지점 한눈에 보기</h2>
-            <RegionMap markers={markers} height={220} />
-            <p className="mt-2 text-[11px] text-fg-muted">
-              <span className="font-bold text-brand">●</span> 특화거리 ·{" "}
-              <span className="font-bold text-accent">●</span> 실제로 파는 집
-            </p>
-          </section>
-
-          <section className="px-5 pt-6">
-            <h2 className="font-display text-[20px]">취향에 맞는 남도 음식</h2>
-            <ol className="mt-3 space-y-3">
-              {scored.map((item, index) => {
-                const best = matchStreets(item.food, streets, 1)[0];
-                return (
-                  <li
-                    key={item.food.id}
-                    className="result-card rounded-2xl border border-line bg-surface px-4 py-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-bold text-brand">{index + 1}</span>
-                          <h3 className="font-display truncate text-[21px]">{item.food.name}</h3>
-                        </div>
-                        <p className="mt-1 text-[12px] text-fg-muted">
-                          {item.food.ingredient && `${item.food.ingredient} · `}
-                          {item.food.regions.slice(0, 2).join(", ")}
-                          {!item.inSeason && " · 이번 달 제철은 아님"}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-center">
-                        <div className="font-display text-[24px] text-brand">{item.match}</div>
-                        <div className="text-[10px] font-bold text-fg-muted">취향 일치</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <TasteBadges food={item.food} />
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3">
-                      <p className="text-[13px] font-medium text-fg">
-                        파는 곳 {item.food.restaurantCount}곳
-                      </p>
-                      {best && (
-                        <Link
-                          href={`/street/${best.street.id}?${preferenceToQuery(pref)}`}
-                          className="min-w-0 truncate text-[13px] text-accent transition-colors hover:text-brand hover:underline"
-                        >
-                          → {streetDisplayName(best.street)}
-                        </Link>
-                      )}
-                    </div>
-
-                    {item.mismatches.length > 0 && (
-                      <p className="mt-2 text-[12px] text-fg-muted">
-                        다만 {item.mismatches.join(", ")}.
-                      </p>
-                    )}
-
-                    {item.food.confidence < 0.6 && (
-                      <p className="mt-1 text-[11px] text-fg-muted">
-                        ※ 메뉴명 정보가 짧아 지표의 근거가 약합니다.
-                      </p>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
+          <FoodRecommendations
+            candidates={candidates}
+            streetMarkers={streetMarkers}
+            prefQuery={preferenceToQuery(pref)}
+            limit={FOOD_LIMIT}
+          />
 
           <section className="px-5 pt-7">
             <h2 className="font-display text-[20px]">가 볼 만한 특화거리</h2>
             <p className="mt-1 text-[12px] text-fg-muted">
-              위 음식들이 실제로 모여 있는 거리를 득표순으로 모았습니다.
+              취향에 맞는 음식들이 실제로 모여 있는 거리를 득표순으로 모았습니다.
             </p>
             <ol className="mt-3 space-y-2.5">
               {topStreets.map((agg, index) => (

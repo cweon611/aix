@@ -1,3 +1,4 @@
+import { streetDisplayName } from "./korean";
 import { getKstMonth } from "./kst";
 import { CATEGORIES, type Category, type Food, type Street } from "./types";
 
@@ -124,20 +125,27 @@ function describeMismatches(pref: Preference, food: Food): string[] {
 }
 
 /**
- * 제철(월) → 코스 순으로 거르고 취향 일치도로 정렬한다.
- * 해당 월 결과가 너무 적으면 앞뒤 한 달까지 넓힌다. 제철이 아닌 것을
- * 억지로 끼워 넣기보다 "이번 달은 아니지만"이라고 밝히는 편이 정직하다.
+ * 제철(월)로 후보를 고른다. 해당 월 결과가 너무 적으면 앞뒤 한 달까지
+ * 넓힌다. 제철이 아닌 것을 억지로 끼워 넣기보다 "이번 달은 아니지만"이라고
+ * 밝히는 편이 정직하다.
  */
-export function recommendFoods(foods: Food[], pref: Preference, limit = 4): ScoredFood[] {
-  const neighbours = [((pref.month + 10) % 12) + 1, pref.month, (pref.month % 12) + 1];
-
+function seasonalPool(foods: Food[], month: number): Food[] {
+  const neighbours = [((month + 10) % 12) + 1, month, (month % 12) + 1];
   // 데이터에 식사만 남아 있어 코스로 거를 것이 없다.
-  const pool = foods;
-  const strict = pool.filter((f) => f.months.includes(pref.month));
-  const relaxed = pool.filter((f) => f.months.some((m) => neighbours.includes(m)));
-  const candidates = strict.length >= 8 ? strict : relaxed;
+  const strict = foods.filter((f) => f.months.includes(month));
+  if (strict.length >= 8) return strict;
+  return foods.filter((f) => f.months.some((m) => neighbours.includes(m)));
+}
 
-  const scored = candidates.map<ScoredFood>((food) => {
+/**
+ * 제철 후보 전부를 취향 일치도순으로 돌려준다.
+ *
+ * 거리순 추천이 이 목록을 그대로 쓴다 — 사용자 위치는 서버가 알 수 없어서
+ * 브라우저에서 다시 정렬해야 하는데, 후보를 상위 몇 개로 잘라 넘기면 "가까운
+ * 집"이 취향 점수에 걸러진 뒤의 가까운 집이 되어 거리순이 거짓말이 된다.
+ */
+export function rankCandidates(foods: Food[], pref: Preference): ScoredFood[] {
+  const scored = seasonalPool(foods, pref.month).map<ScoredFood>((food) => {
     // 근거가 약한 지표가 근거 있는 지표를 이기고 1위에 오르면 납득할 수 없다.
     const credibility = 0.85 + 0.15 * food.confidence;
     return {
@@ -155,7 +163,12 @@ export function recommendFoods(foods: Food[], pref: Preference, limit = 4): Scor
     return b.food.restaurantCount - a.food.restaurantCount;
   });
 
-  return diversify(scored, limit);
+  return diversify(scored, scored.length);
+}
+
+/** 취향 일치도순 상위 몇 가지. */
+export function recommendFoods(foods: Food[], pref: Preference, limit = 4): ScoredFood[] {
+  return rankCandidates(foods, pref).slice(0, limit);
 }
 
 /** 한 식재료가 결과를 독점하지 못하게 하는 상한. */
@@ -317,6 +330,164 @@ export function aggregateStreets(
     .map((a) => ({ ...a, foods: a.foods.sort((x, y) => y.match - x.match).slice(0, 4) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+}
+
+// --------------------------------------------------------------------------
+// 위치 기반 — 내 자리에서 가까운 순
+// --------------------------------------------------------------------------
+
+/** 그 음식을 실제로 파는 집 중 좌표가 있는 곳. */
+export interface FoodSpot {
+  name: string;
+  area: string;
+  lat: number;
+  lon: number;
+}
+
+/**
+ * 거리 계산을 브라우저에서 하려고 클라이언트로 넘기는 최소 정보.
+ *
+ * Food를 통째로 넘기지 않는다. 제철 후보는 많은 달에 150건까지 가는데
+ * Food에는 화면에 안 쓰는 주소 문자열과 지역 목록이 통으로 들어 있어서,
+ * 그대로 넘기면 RSC payload가 몇 배로 부푼다. 카드에 그리는 것과 거리
+ * 계산에 필요한 것만 남긴다.
+ */
+export interface NearbyCandidate {
+  id: string;
+  name: string;
+  ingredient: string;
+  /** 화면에 두 개만 쓰므로 잘라서 넘긴다. */
+  regions: string[];
+  spicy: number;
+  hasSoup: boolean;
+  isRaw: boolean;
+  mainIngredients: Category[];
+  confidence: number;
+  restaurantCount: number;
+  match: number;
+  inSeason: boolean;
+  mismatches: string[];
+  /** 취향순 카드에 거는 특화거리 링크. 서버에서 미리 골라 둔다. */
+  bestStreet: { id: string; name: string } | null;
+  spots: FoodSpot[];
+}
+
+/**
+ * 취향순으로 정렬된 후보를 클라이언트가 쓸 형태로 줄인다.
+ *
+ * `linkLimit`은 특화거리 링크를 붙일 개수다. 이 링크는 취향순 카드에만
+ * 나오고 취향순은 언제나 앞에서부터 자르므로, 뒤쪽 후보까지 거리를
+ * 매칭해 봐야 payload만 늘고 화면에는 안 나온다.
+ */
+export function toNearbyCandidates(
+  scored: ScoredFood[],
+  streets: Street[],
+  linkLimit = 4,
+): NearbyCandidate[] {
+  return scored.map((item, index) => {
+    const best = index < linkLimit ? matchStreets(item.food, streets, 1)[0] : undefined;
+    return {
+      id: item.food.id,
+      name: item.food.name,
+      ingredient: item.food.ingredient,
+      regions: item.food.regions.slice(0, 2),
+      spicy: item.food.spicy,
+      hasSoup: item.food.hasSoup,
+      isRaw: item.food.isRaw,
+      mainIngredients: item.food.mainIngredients,
+      confidence: item.food.confidence,
+      restaurantCount: item.food.restaurantCount,
+      match: item.match,
+      inSeason: item.inSeason,
+      mismatches: item.mismatches,
+      bestStreet: best
+        ? { id: best.street.id, name: streetDisplayName(best.street) }
+        : null,
+      spots: item.food.restaurants
+        .filter((r) => r.lat !== null && r.lon !== null)
+        .map((r) => ({
+          name: r.name,
+          area: r.area,
+          lat: r.lat as number,
+          lon: r.lon as number,
+        })),
+    };
+  });
+}
+
+export interface NearbyFood {
+  candidate: NearbyCandidate;
+  /** 내 위치에서 가장 가까운 집까지의 거리(km). */
+  distanceKm: number;
+  nearest: FoodSpot;
+}
+
+/**
+ * 내 위치에서 가까운 순으로 다시 세운다.
+ *
+ * 좌표가 있는 집이 하나도 없는 음식은 뺀다. 거리를 모르는 것을 목록 끝에
+ * 붙이면 "가까운 순"이라는 약속이 흐려진다.
+ */
+export function rankByDistance(
+  candidates: NearbyCandidate[],
+  origin: { lat: number; lon: number },
+  limit = 4,
+): NearbyFood[] {
+  const measured: NearbyFood[] = [];
+
+  for (const candidate of candidates) {
+    let nearest: FoodSpot | null = null;
+    let shortest = Infinity;
+    for (const spot of candidate.spots) {
+      const km = haversineKm(origin, spot);
+      if (km < shortest) {
+        shortest = km;
+        nearest = spot;
+      }
+    }
+    if (nearest) measured.push({ candidate, distanceKm: shortest, nearest });
+  }
+
+  measured.sort((a, b) => a.distanceKm - b.distanceKm);
+
+  // 같은 이름이 재료만 다르게 두 번 들어온 것을 먼저 걷어낸다.
+  const seenNames = new Set<string>();
+  const deduped = measured.filter((item) => {
+    if (seenNames.has(item.candidate.name)) return false;
+    seenNames.add(item.candidate.name);
+    return true;
+  });
+
+  // 취향순과 같은 재료별 상한을 건다. 목포역에서 순수 거리순을 그대로 내면
+  // 네 칸이 "갈치찜 백반 / 먹갈치 구이 백반 / 갈치찜 / 갈치찜·갈치구이"로
+  // 채워진다 — 거리는 정직하지만 고를 것이 없는 목록이다. 대신 이 규칙을
+  // 화면에 밝혀서, 더 가까운 것이 밀려난 이유를 사용자가 알 수 있게 한다.
+  const taken: NearbyFood[] = [];
+  const overflow: NearbyFood[] = [];
+  const perIngredient = new Map<string, number>();
+
+  for (const item of deduped) {
+    const key = item.candidate.ingredient || item.candidate.name;
+    const count = perIngredient.get(key) ?? 0;
+    if (count < MAX_PER_INGREDIENT && taken.length < limit) {
+      taken.push(item);
+      perIngredient.set(key, count + 1);
+    } else {
+      overflow.push(item);
+    }
+  }
+
+  return taken.concat(overflow).slice(0, limit);
+}
+
+/** 화면에 쓸 거리 표기. 1km 밑은 m로 끊어야 "0.3km"보다 읽힌다. */
+export function formatDistance(km: number): string {
+  // 10m 단위로 끊는다. 좌표 정밀도를 생각하면 1m 자리는 없는 정확도다.
+  // 바로 앞에 서 있어도 "0m"라고 쓰지는 않는다 — 고장 난 것처럼 보인다.
+  const metres = Math.max(10, Math.round((km * 1000) / 10) * 10);
+  if (metres < 1000) return `${metres}m`;
+  if (km < 10) return `${km.toFixed(1)}km`;
+  return `${Math.round(km)}km`;
 }
 
 // --------------------------------------------------------------------------

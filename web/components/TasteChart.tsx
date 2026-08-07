@@ -7,6 +7,9 @@ import {
   type Food,
 } from "@/lib/types";
 
+/** 배지를 그리는 데 실제로 필요한 것만. Food도 이 모양을 만족한다. */
+type Tasted = Pick<Food, "spicy" | "hasSoup" | "isRaw" | "mainIngredients">;
+
 /**
  * 음식의 지표 네 가지를 배지로 늘어놓는다.
  *
@@ -14,7 +17,7 @@ import {
  * 막대보다 "맵기 약간 / 국물 있음 / 익힘 / 해산물"처럼 말로 읽히는 편이
  * 정확하다.
  */
-export function TasteBadges({ food, compact = false }: { food: Food; compact?: boolean }) {
+export function TasteBadges({ food, compact = false }: { food: Tasted; compact?: boolean }) {
   const size = compact ? "text-[11px] px-1.5 py-0.5" : "text-[12px] px-2 py-1";
 
   return (

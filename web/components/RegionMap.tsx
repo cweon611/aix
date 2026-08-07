@@ -10,13 +10,22 @@ export interface MapMarker {
   lat: number;
   lon: number;
   label: string;
-  kind: "street" | "restaurant";
+  kind: "street" | "restaurant" | "me";
   /** 강조할 마커. 라벨을 항상 띄운다. */
   highlight?: boolean;
 }
 
 const STREET_COLOR = "#b23a22";
 const RESTAURANT_COLOR = "#1f5f52";
+// 내 위치는 추천 지점과 다른 계열의 색이어야 한다. 같은 붉은·초록 계열이면
+// "가까운 집"과 "나"가 지도에서 섞여 보인다.
+const ME_COLOR = "#2e6e8e";
+
+const MARKER_COLOR: Record<MapMarker["kind"], string> = {
+  street: STREET_COLOR,
+  restaurant: RESTAURANT_COLOR,
+  me: ME_COLOR,
+};
 
 function buildDivIcon(leaflet: typeof L, color: string, size: number): L.DivIcon {
   return leaflet.divIcon({
@@ -96,9 +105,8 @@ export function RegionMap({
       );
 
       for (const m of ordered) {
-        const isStreet = m.kind === "street";
-        const color = isStreet ? STREET_COLOR : RESTAURANT_COLOR;
-        const size = m.highlight ? 20 : isStreet ? 15 : 10;
+        const color = MARKER_COLOR[m.kind];
+        const size = m.highlight ? 20 : m.kind === "street" ? 15 : 10;
         const marker = leaflet.marker([m.lat, m.lon], {
           icon: buildDivIcon(leaflet, color, size),
         });
