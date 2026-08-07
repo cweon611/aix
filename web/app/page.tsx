@@ -48,6 +48,12 @@ export default function LandingPage() {
           <p className="mt-4 text-center text-[11px] text-[#b8afa6]">
             음식 {meta.foodCount}건 · 특화거리 {meta.streetCount}건
           </p>
+          <Link
+            href="/how"
+            className="mx-auto mt-3 block w-fit text-[12px] text-[#d8cfc2] underline underline-offset-4 transition-colors hover:text-fg-inverse"
+          >
+            어떻게 추천하나요?
+          </Link>
         </div>
       </div>
     </main>

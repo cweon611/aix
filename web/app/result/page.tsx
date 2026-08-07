@@ -48,15 +48,28 @@ export default async function ResultPage({
   return (
     <main className="mx-auto min-h-dvh w-full max-w-[520px] bg-canvas pb-12">
       <header className="bg-ink px-6 pb-5 pt-11 text-fg-inverse">
-        <Link
-          href="/taste"
-          className="block w-fit text-[13px] text-[#b8afa6] transition-colors hover:text-fg-inverse"
-        >
-          ← 취향 다시 고르기
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            href="/taste"
+            className="block w-fit text-[13px] text-[#b8afa6] transition-colors hover:text-fg-inverse"
+          >
+            ← 취향 다시 고르기
+          </Link>
+          <Link
+            href="/how"
+            className="shrink-0 rounded-full border border-[#4a423a] px-2.5 py-1 text-[11px] font-bold text-[#b8afa6] transition-colors hover:border-fg-inverse hover:text-fg-inverse"
+          >
+            추천 방식
+          </Link>
+        </div>
         <h1 className="font-display mt-2 text-[26px] leading-tight">
           {pref.month}월의 남도, {Math.min(ranked.length, FOOD_LIMIT)}가지
         </h1>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-[#b8afa6]">
+          {pref.month}월 제철 후보 {ranked.length}가지를 아래 취향으로 채점했습니다. 카드마다
+          <b className="font-bold text-fg-inverse"> ‘왜 이 음식인가요?’</b>를 펼치면 점수가
+          어떻게 나왔는지 볼 수 있습니다.
+        </p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Chip color={SPICY_COLOR} label={`맵기 ${spicyLabel}`} />
           <Chip
@@ -84,6 +97,7 @@ export default async function ResultPage({
           <FoodRecommendations
             candidates={candidates}
             streetMarkers={streetMarkers}
+            pref={pref}
             prefQuery={preferenceToQuery(pref)}
             limit={FOOD_LIMIT}
           />

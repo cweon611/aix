@@ -1,6 +1,6 @@
 import { streetDisplayName } from "./korean";
 import { getKstMonth } from "./kst";
-import { CATEGORIES, type Category, type Food, type Street } from "./types";
+import { CATEGORIES, SPICY_LEVELS, type Category, type Food, type Street } from "./types";
 
 /** 국물 선호. 1은 "상관없음"이라 점수에 영향을 주지 않는다. */
 export type SoupPreference = 0 | 1 | 2;
@@ -44,57 +44,228 @@ export const INGREDIENT_OPTIONS: IngredientPreference[] = [...CATEGORIES, "상�
 
 // --------------------------------------------------------------------------
 // 취향 일치도
+//
+// 이 절은 점수를 "계산"하는 동시에 "왜 그 점수인지"를 함께 돌려준다.
+// 화면의 설명 패널이 별도 문구 테이블을 들고 있으면 배점을 고칠 때마다
+// 설명이 조용히 어긋난다. 채점과 설명을 한 함수에서 만들어 두면 그럴 수 없다.
 // --------------------------------------------------------------------------
 
-// 지표별 배점. 합이 100이 되게 두어 화면의 "취향 일치 87" 이 곧 백분율이다.
-const WEIGHT_SPICY = 30;
-const WEIGHT_SOUP = 25;
-const WEIGHT_RAW = 20;
-const WEIGHT_INGREDIENT = 25;
+/** 지표별 배점. 합이 100이 되게 두어 화면의 "취향 일치 87" 이 곧 백분율이다. */
+export const AXIS_WEIGHTS = {
+  spicy: 30,
+  soup: 25,
+  raw: 20,
+  ingredient: 25,
+} as const;
+
+export type AxisKey = keyof typeof AXIS_WEIGHTS;
+
+export const AXIS_LABELS: Record<AxisKey, string> = {
+  spicy: "맵기",
+  soup: "국물",
+  raw: "날것",
+  ingredient: "주재료",
+};
+
+/** 날것을 원했는데 익힌 메뉴일 때 남겨 주는 비율. */
+export const RAW_PARTIAL = 0.4;
+
+/** 근거 계수의 하한. confidence가 0이어도 점수를 이보다 더 깎지는 않는다. */
+export const CREDIBILITY_FLOOR = 0.85;
+
+/** 근거가 약하다고 화면에 밝히는 기준. */
+export const LOW_CONFIDENCE = 0.6;
+
+/** 배점을 얻은 정도. skipped는 "상관없음이라 채점에서 뺀 것"이다. */
+export type AxisVerdict = "match" | "partial" | "miss" | "skipped";
+
+export interface AxisScore {
+  key: AxisKey;
+  label: string;
+  /** 이 지표의 배점. skipped면 0 — 만점에서도 함께 빠진다. */
+  weight: number;
+  earned: number;
+  verdict: AxisVerdict;
+  /** 사용자가 고른 값 */
+  you: string;
+  /** 이 음식의 값 */
+  it: string;
+  /** 왜 이만큼인지 한 줄 */
+  note: string;
+}
+
+export interface MatchExplanation {
+  axes: AxisScore[];
+  /** 채점에 쓴 배점 합. "상관없음"을 고를수록 작아진다. */
+  total: number;
+  earned: number;
+  /** earned/total. 반올림 전 백분율. */
+  percent: number;
+  confidence: number;
+  /** 근거 계수 0.85~1.00 */
+  credibility: number;
+  /** 화면에 찍히는 최종 점수 */
+  score: number;
+}
+
+/** 채점에 필요한 취향. month는 후보를 고르는 데만 쓰여 여기 들어오지 않는다. */
+export type TastePreference = Omit<Preference, "month">;
+
+/** 채점에 필요한 음식 정보. Food도 NearbyCandidate도 이 모양을 만족한다. */
+export type ScorableFood = Pick<
+  Food,
+  "spicy" | "hasSoup" | "isRaw" | "mainIngredients" | "confidence"
+>;
+
+export function spicyLabel(level: number): string {
+  return SPICY_LEVELS.find((l) => l.value === level)?.label ?? `${level}`;
+}
 
 /**
- * 지표 네 가지를 각각 0~1로 채점해 가중 합한다.
+ * 지표 네 가지를 각각 채점하고, 그 과정을 그대로 돌려준다.
  *
  * "상관없음"을 고른 지표는 배점 자체를 빼서, 신경 안 쓴 항목이 점수를
  * 끌어내리지도 올리지도 않게 한다. 그래야 모두 "상관없음"으로 두었을 때
  * 남는 지표만으로 순위가 갈린다.
  */
-export function preferenceMatch(pref: Preference, food: Food): number {
-  let earned = 0;
-  let total = 0;
+export function explainMatch(pref: TastePreference, food: ScorableFood): MatchExplanation {
+  const axes: AxisScore[] = [];
 
   // 맵기 — 0~3에서 얼마나 어긋났는지. 3칸 차이면 0점.
-  total += WEIGHT_SPICY;
-  earned += WEIGHT_SPICY * (1 - Math.abs(pref.spicy - food.spicy) / 3);
+  const gap = Math.abs(pref.spicy - food.spicy);
+  const spicyRatio = 1 - gap / 3;
+  axes.push({
+    key: "spicy",
+    label: AXIS_LABELS.spicy,
+    weight: AXIS_WEIGHTS.spicy,
+    earned: AXIS_WEIGHTS.spicy * spicyRatio,
+    verdict: gap === 0 ? "match" : gap === 1 ? "partial" : "miss",
+    you: spicyLabel(pref.spicy),
+    it: spicyLabel(food.spicy),
+    note:
+      gap === 0
+        ? "고른 단계와 정확히 같습니다."
+        : `${gap}단계 차이라 배점의 ${Math.round(spicyRatio * 100)}%만 얻었습니다.`,
+  });
 
   // 국물 — 상관없음(1)이면 채점하지 않는다.
-  if (pref.soup !== 1) {
-    total += WEIGHT_SOUP;
+  const soupIs = food.hasSoup ? "국물 있음" : "국물 없음";
+  if (pref.soup === 1) {
+    axes.push({
+      key: "soup",
+      label: AXIS_LABELS.soup,
+      weight: 0,
+      earned: 0,
+      verdict: "skipped",
+      you: "상관없음",
+      it: soupIs,
+      note: `‘상관없음’이라 채점에서 뺐습니다. 배점 ${AXIS_WEIGHTS.soup}점이 만점에서도 함께 빠집니다.`,
+    });
+  } else {
     const wantsSoup = pref.soup === 2;
-    if (wantsSoup === food.hasSoup) earned += WEIGHT_SOUP;
+    const hit = wantsSoup === food.hasSoup;
+    axes.push({
+      key: "soup",
+      label: AXIS_LABELS.soup,
+      weight: AXIS_WEIGHTS.soup,
+      earned: hit ? AXIS_WEIGHTS.soup : 0,
+      verdict: hit ? "match" : "miss",
+      you: wantsSoup ? "국물 있게" : "국물 없이",
+      it: soupIs,
+      note: hit ? "고른 것과 같습니다." : "고른 것과 반대라 점수를 얻지 못했습니다.",
+    });
   }
 
   // 날것 — O는 날것을 원하고 X는 익힌 것을 원한다.
-  total += WEIGHT_RAW;
   const wantsRaw = pref.raw === "O";
+  const rawIs = food.isRaw ? "날것" : "익힘";
   if (wantsRaw === food.isRaw) {
-    earned += WEIGHT_RAW;
+    axes.push({
+      key: "raw",
+      label: AXIS_LABELS.raw,
+      weight: AXIS_WEIGHTS.raw,
+      earned: AXIS_WEIGHTS.raw,
+      verdict: "match",
+      you: wantsRaw ? "날것도 좋아요" : "익힌 것으로",
+      it: rawIs,
+      note: "고른 것과 같습니다.",
+    });
   } else if (wantsRaw) {
     // 날것을 원했는데 익힌 것이면 아깝다. 반대(익힌 걸 원했는데 날것)보다는
     // 덜 치명적이라 절반만 깎는다 — 날것 메뉴 자체가 적기 때문이다.
-    earned += WEIGHT_RAW * 0.4;
+    axes.push({
+      key: "raw",
+      label: AXIS_LABELS.raw,
+      weight: AXIS_WEIGHTS.raw,
+      earned: AXIS_WEIGHTS.raw * RAW_PARTIAL,
+      verdict: "partial",
+      you: "날것도 좋아요",
+      it: rawIs,
+      note: `날것 메뉴 자체가 드물어, 익힌 메뉴라도 배점의 ${Math.round(RAW_PARTIAL * 100)}%는 남깁니다.`,
+    });
+  } else {
+    axes.push({
+      key: "raw",
+      label: AXIS_LABELS.raw,
+      weight: AXIS_WEIGHTS.raw,
+      earned: 0,
+      verdict: "miss",
+      you: "익힌 것으로",
+      it: rawIs,
+      note: "익힌 것을 골랐는데 날것으로 먹는 메뉴라 점수를 얻지 못했습니다.",
+    });
   }
 
   // 주재료 — 상관없음이면 채점하지 않는다.
-  if (pref.ingredient !== "상관없음") {
-    total += WEIGHT_INGREDIENT;
-    if (food.mainIngredients.includes(pref.ingredient)) {
-      earned += WEIGHT_INGREDIENT;
-    }
+  const ingredientIs = food.mainIngredients.join("·") || "분류 없음";
+  if (pref.ingredient === "상관없음") {
+    axes.push({
+      key: "ingredient",
+      label: AXIS_LABELS.ingredient,
+      weight: 0,
+      earned: 0,
+      verdict: "skipped",
+      you: "상관없음",
+      it: ingredientIs,
+      note: `‘상관없음’이라 채점에서 뺐습니다. 배점 ${AXIS_WEIGHTS.ingredient}점이 만점에서도 함께 빠집니다.`,
+    });
+  } else {
+    const hit = food.mainIngredients.includes(pref.ingredient);
+    axes.push({
+      key: "ingredient",
+      label: AXIS_LABELS.ingredient,
+      weight: AXIS_WEIGHTS.ingredient,
+      earned: hit ? AXIS_WEIGHTS.ingredient : 0,
+      verdict: hit ? "match" : "miss",
+      you: pref.ingredient,
+      it: ingredientIs,
+      note: hit
+        ? "고른 주재료가 들어갑니다."
+        : "고른 주재료가 이 메뉴의 대표 재료가 아닙니다.",
+    });
   }
 
-  if (total === 0) return 0;
-  return (earned / total) * 100;
+  const total = axes.reduce((sum, a) => sum + a.weight, 0);
+  const earned = axes.reduce((sum, a) => sum + a.earned, 0);
+  const percent = total === 0 ? 0 : (earned / total) * 100;
+
+  // 근거가 약한 지표가 근거 있는 지표를 이기고 1위에 오르면 납득할 수 없다.
+  const credibility = CREDIBILITY_FLOOR + (1 - CREDIBILITY_FLOOR) * food.confidence;
+
+  return {
+    axes,
+    total,
+    earned,
+    percent,
+    confidence: food.confidence,
+    credibility,
+    score: Math.round(percent * credibility),
+  };
+}
+
+/** 근거 계수를 빼고 본 순수 취향 일치도(0~100). */
+export function preferenceMatch(pref: TastePreference, food: ScorableFood): number {
+  return explainMatch(pref, food).percent;
 }
 
 export interface ScoredFood {
@@ -105,6 +276,8 @@ export interface ScoredFood {
   inSeason: boolean;
   /** 사용자 선택과 어긋난 지표들 — 카드에 "다만 …" 문구로 쓴다. */
   mismatches: string[];
+  /** 같은 재료 상한에 걸려 점수보다 뒤로 밀렸으면 true. */
+  demoted: boolean;
 }
 
 function describeMismatches(pref: Preference, food: Food): string[] {
@@ -129,12 +302,24 @@ function describeMismatches(pref: Preference, food: Food): string[] {
  * 넓힌다. 제철이 아닌 것을 억지로 끼워 넣기보다 "이번 달은 아니지만"이라고
  * 밝히는 편이 정직하다.
  */
+/** 이번 달만으로 후보를 세우기에 충분한 최소 개수. */
+export const STRICT_POOL_MIN = 8;
+
 function seasonalPool(foods: Food[], month: number): Food[] {
   const neighbours = [((month + 10) % 12) + 1, month, (month % 12) + 1];
   // 데이터에 식사만 남아 있어 코스로 거를 것이 없다.
   const strict = foods.filter((f) => f.months.includes(month));
-  if (strict.length >= 8) return strict;
+  if (strict.length >= STRICT_POOL_MIN) return strict;
   return foods.filter((f) => f.months.some((m) => neighbours.includes(m)));
+}
+
+/** 후보를 어떻게 골랐는지. 설명 패널의 "제철 후보 N가지 중 X위"에 쓴다. */
+export function seasonalPoolInfo(
+  foods: Food[],
+  month: number,
+): { strict: number; widened: boolean } {
+  const strict = foods.filter((f) => f.months.includes(month)).length;
+  return { strict, widened: strict < STRICT_POOL_MIN };
 }
 
 /**
@@ -145,16 +330,13 @@ function seasonalPool(foods: Food[], month: number): Food[] {
  * 집"이 취향 점수에 걸러진 뒤의 가까운 집이 되어 거리순이 거짓말이 된다.
  */
 export function rankCandidates(foods: Food[], pref: Preference): ScoredFood[] {
-  const scored = seasonalPool(foods, pref.month).map<ScoredFood>((food) => {
-    // 근거가 약한 지표가 근거 있는 지표를 이기고 1위에 오르면 납득할 수 없다.
-    const credibility = 0.85 + 0.15 * food.confidence;
-    return {
-      food,
-      match: Math.round(preferenceMatch(pref, food) * credibility),
-      inSeason: food.months.includes(pref.month),
-      mismatches: describeMismatches(pref, food),
-    };
-  });
+  const scored = seasonalPool(foods, pref.month).map<ScoredFood>((food) => ({
+    food,
+    match: explainMatch(pref, food).score,
+    inSeason: food.months.includes(pref.month),
+    mismatches: describeMismatches(pref, food),
+    demoted: false,
+  }));
 
   scored.sort((a, b) => {
     if (b.match !== a.match) return b.match - a.match;
@@ -172,7 +354,7 @@ export function recommendFoods(foods: Food[], pref: Preference, limit = 4): Scor
 }
 
 /** 한 식재료가 결과를 독점하지 못하게 하는 상한. */
-const MAX_PER_INGREDIENT = 2;
+export const MAX_PER_INGREDIENT = 2;
 
 /**
  * 점수순 정렬만 하면 "전복문어탕·전복연포탕·전복해신탕"처럼 같은 재료의
@@ -200,7 +382,9 @@ function diversify(scored: ScoredFood[], limit: number): ScoredFood[] {
       taken.push(item);
       seen.set(key, count + 1);
     } else {
-      overflow.push(item);
+      // 점수만 보면 더 앞이었는데 상한에 걸려 밀린 것. 화면에서 그 사실을
+      // 밝혀야 "점수가 높은데 왜 아래 있지?"가 생기지 않는다.
+      overflow.push({ ...item, demoted: true });
     }
   }
 
@@ -367,6 +551,8 @@ export interface NearbyCandidate {
   match: number;
   inSeason: boolean;
   mismatches: string[];
+  /** 같은 재료 상한에 걸려 점수보다 뒤로 밀렸으면 true. */
+  demoted: boolean;
   /** 취향순 카드에 거는 특화거리 링크. 서버에서 미리 골라 둔다. */
   bestStreet: { id: string; name: string } | null;
   spots: FoodSpot[];
@@ -400,6 +586,7 @@ export function toNearbyCandidates(
       match: item.match,
       inSeason: item.inSeason,
       mismatches: item.mismatches,
+      demoted: item.demoted,
       bestStreet: best
         ? { id: best.street.id, name: streetDisplayName(best.street) }
         : null,
@@ -420,6 +607,8 @@ export interface NearbyFood {
   /** 내 위치에서 가장 가까운 집까지의 거리(km). */
   distanceKm: number;
   nearest: FoodSpot;
+  /** 거리순에서도 같은 재료 상한에 걸려 밀렸으면 true. */
+  demotedByIngredient: boolean;
 }
 
 /**
@@ -445,7 +634,8 @@ export function rankByDistance(
         nearest = spot;
       }
     }
-    if (nearest) measured.push({ candidate, distanceKm: shortest, nearest });
+    if (nearest)
+      measured.push({ candidate, distanceKm: shortest, nearest, demotedByIngredient: false });
   }
 
   measured.sort((a, b) => a.distanceKm - b.distanceKm);
@@ -473,7 +663,7 @@ export function rankByDistance(
       taken.push(item);
       perIngredient.set(key, count + 1);
     } else {
-      overflow.push(item);
+      overflow.push({ ...item, demotedByIngredient: true });
     }
   }
 

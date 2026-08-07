@@ -6,11 +6,14 @@ import { useMemo, useState } from "react";
 import { OptionGroup } from "@/components/OptionGroup";
 import { RegionMap, type MapMarker } from "@/components/RegionMap";
 import { TasteBadges } from "@/components/TasteChart";
+import { WhyThisFood } from "@/components/WhyThisFood";
 import {
+  LOW_CONFIDENCE,
   formatDistance,
   rankByDistance,
   type NearbyCandidate,
   type NearbyFood,
+  type Preference,
 } from "@/lib/recommend";
 
 export type SortMode = "취향순" | "거리순";
@@ -47,6 +50,7 @@ function describeGeolocationError(error: GeolocationPositionError): string {
 export function FoodRecommendations({
   candidates,
   streetMarkers,
+  pref,
   prefQuery,
   limit = 4,
 }: {
@@ -54,6 +58,8 @@ export function FoodRecommendations({
   candidates: NearbyCandidate[];
   /** 지도에 함께 찍을 특화거리 마커. 정렬 모드와 무관하게 그대로 둔다. */
   streetMarkers: MapMarker[];
+  /** 채점을 화면에서 그대로 되짚기 위해 취향 자체를 넘긴다. */
+  pref: Preference;
   /** 특화거리 링크에 취향을 그대로 물려주기 위한 쿼리스트링. */
   prefQuery: string;
   limit?: number;
@@ -204,6 +210,8 @@ export function FoodRecommendations({
                     key={item.candidate.id}
                     candidate={item.candidate}
                     rank={index + 1}
+                    pref={pref}
+                    poolSize={candidates.length}
                     prefQuery={prefQuery}
                     nearby={item}
                   />
@@ -213,6 +221,8 @@ export function FoodRecommendations({
                     key={candidate.id}
                     candidate={candidate}
                     rank={index + 1}
+                    pref={pref}
+                    poolSize={candidates.length}
                     prefQuery={prefQuery}
                   />
                 ))}
@@ -231,11 +241,15 @@ export function FoodRecommendations({
 function FoodCard({
   candidate,
   rank,
+  pref,
+  poolSize,
   prefQuery,
   nearby,
 }: {
   candidate: NearbyCandidate;
   rank: number;
+  pref: Preference;
+  poolSize: number;
   prefQuery: string;
   /** 거리순일 때만 넘어온다. */
   nearby?: NearbyFood;
@@ -289,11 +303,19 @@ function FoodCard({
         <p className="mt-2 text-[12px] text-fg-muted">다만 {candidate.mismatches.join(", ")}.</p>
       )}
 
-      {candidate.confidence < 0.6 && (
+      {candidate.confidence < LOW_CONFIDENCE && (
         <p className="mt-1 text-[11px] text-fg-muted">
           ※ 메뉴명 정보가 짧아 지표의 근거가 약합니다.
         </p>
       )}
+
+      <WhyThisFood
+        candidate={candidate}
+        pref={pref}
+        rank={rank}
+        poolSize={poolSize}
+        nearby={nearby}
+      />
     </li>
   );
 }
