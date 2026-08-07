@@ -345,11 +345,14 @@ def main() -> None:
         rows = list(csv.DictReader(fh))
 
     items = []
+    before = []   # (주재료 라벨, 맵기) — 분포 비교에만 쓴다
+    changed = []  # (주재료 바뀜, 맵기 바뀜)
     for row in rows:
         menu_norm = row["menu_norm"]
         course = row["course"]
         before_ing = [c for c in row["main_ingredients"].split(";") if c]
         before_spicy = int(row["spicy"])
+        before.append((before_ing, before_spicy))
 
         ing = resolve_ingredients(row["menu_key"], menu_norm, row["ingredient"])
         spicy = resolve_spicy(menu_norm, course)
@@ -371,22 +374,22 @@ def main() -> None:
             ing_conf = min(ing_conf, 0.50)
             spicy_conf = min(spicy_conf, 0.60)
 
+        # before는 항목마다 싣지 않는다. 원본은 menu_taste_profile.csv에 그대로
+        # 있고, 검수자가 판단할 것은 '무엇에서 바뀌었나'가 아니라 '이 라벨이
+        # 맞나'다. 바뀐 폭은 아래 summary의 분포로만 남긴다.
+        changed.append((before_ing != ing["labels"], before_spicy != spicy["level"]))
         items.append({
             "menu_key": row["menu_key"],
             "menu_name": row["menu_name"],
             "course": course,
             "main_ingredients": {
-                "before": before_ing,
-                "after": ing["labels"],
-                "changed": before_ing != ing["labels"],
+                "labels": ing["labels"],
                 "basis": ing["basis"],
                 "confidence": round(ing_conf, 2),
                 "reason": ing["reason"],
             },
             "spicy": {
-                "before": before_spicy,
-                "after": spicy["level"],
-                "changed": before_spicy != spicy["level"],
+                "level": spicy["level"],
                 "matched": spicy["matched"],
                 "confidence": round(spicy_conf, 2),
                 "reason": spicy["reason"],
@@ -395,10 +398,13 @@ def main() -> None:
             "review_notes": notes,
         })
 
-    def dist(pick) -> dict:
-        return dict(sorted(Counter(pick(i) for i in items).items(), key=lambda kv: str(kv[0])))
+    def dist(values) -> dict:
+        return dict(sorted(Counter(values).items(), key=lambda kv: str(kv[0])))
 
-    meals = [i for i in items if i["course"] == "식사"]
+    def label_key(labels: list[str]) -> str:
+        return ";".join(labels) or "(없음)"
+
+    meals = [n for n, i in enumerate(items) if i["course"] == "식사"]
     payload = {
         "generated_from": PROFILE.name,
         "criteria": {
@@ -422,18 +428,18 @@ def main() -> None:
             "meal_count": len(meals),
             "needs_review": sum(1 for i in items if i["needs_review"]),
             "main_ingredients": {
-                "before": dist(lambda i: ";".join(i["main_ingredients"]["before"]) or "(없음)"),
-                "after": dist(lambda i: ";".join(i["main_ingredients"]["after"]) or "(없음)"),
-                "multi_before": sum(1 for i in items if len(i["main_ingredients"]["before"]) > 1),
-                "multi_after": sum(1 for i in items if len(i["main_ingredients"]["after"]) > 1),
-                "changed": sum(1 for i in items if i["main_ingredients"]["changed"]),
+                "before": dist(label_key(b[0]) for b in before),
+                "after": dist(label_key(i["main_ingredients"]["labels"]) for i in items),
+                "multi_before": sum(1 for b in before if len(b[0]) > 1),
+                "multi_after": sum(1 for i in items if len(i["main_ingredients"]["labels"]) > 1),
+                "changed": sum(1 for c in changed if c[0]),
             },
             "spicy": {
-                "before": dist(lambda i: i["spicy"]["before"]),
-                "after": dist(lambda i: i["spicy"]["after"]),
-                "meal_before": dict(sorted(Counter(i["spicy"]["before"] for i in meals).items())),
-                "meal_after": dict(sorted(Counter(i["spicy"]["after"] for i in meals).items())),
-                "changed": sum(1 for i in items if i["spicy"]["changed"]),
+                "before": dist(b[1] for b in before),
+                "after": dist(i["spicy"]["level"] for i in items),
+                "meal_before": dist(before[n][1] for n in meals),
+                "meal_after": dist(items[n]["spicy"]["level"] for n in meals),
+                "changed": sum(1 for c in changed if c[1]),
             },
         },
         "items": items,
