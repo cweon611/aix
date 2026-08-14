@@ -1,15 +1,14 @@
 import { NOTE_MAX, type AccuracyVerdict, type FeedbackPayload } from "@/lib/feedback";
+import { storeFeedback } from "@/lib/feedback-store";
 import { AXIS_LABELS, type AxisKey } from "@/lib/recommend";
 
 /**
  * "이 정보가 실제와 다른가요?" 답을 받는다.
  *
- * 이 서비스에는 데이터베이스가 없다. 그래서 받은 답은 구조화된 한 줄로
- * 런타임 로그에 남긴다. 로그는 "얼마나, 어떤 메뉴에 들어오는지"를 보기 위한
- * 자리이지 쌓아 두는 자리가 아니다 — 로그는 배포 플랫폼의 보존 기간이 지나면
- * 사라진다. 반영은 사람이 읽고 src/taste/manual_labels.py에 옮기는 것으로 끝난다.
- *
- * 저장소를 붙일 때 고칠 곳은 logFeedback 한 군데다.
+ * 받은 것을 어디에 넣을지는 lib/feedback-store.ts가 정한다. 여기서 하는 일은
+ * 들어온 몸통을 우리가 아는 모양으로 깎는 것과, 넣지 못했을 때 그렇다고
+ * 말해 주는 것뿐이다. 화면은 실패를 들으면 답을 기기에 남겨 두었다가 다음
+ * 방문에 다시 보낸다.
  */
 
 /** 몸통이 커 봐야 이 정도다. 그보다 크면 읽지 않고 자른다. */
@@ -62,14 +61,6 @@ function parse(body: unknown): FeedbackPayload | null {
   };
 }
 
-/** 저장소가 생기면 여기만 바꾸면 된다. */
-function logFeedback(payload: FeedbackPayload): void {
-  // 한 줄 JSON으로 남긴다. 로그를 긁어 집계할 때 줄 단위로 파싱된다.
-  console.log(
-    `[accuracy-feedback] ${JSON.stringify({ at: new Date().toISOString(), ...payload })}`,
-  );
-}
-
 export async function POST(request: Request): Promise<Response> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
@@ -86,8 +77,11 @@ export async function POST(request: Request): Promise<Response> {
   const payload = parse(body);
   if (!payload) return new Response(null, { status: 400 });
 
-  logFeedback(payload);
+  const result = await storeFeedback(payload);
+  // 넣지 못했으면 넣은 척하지 않는다. 화면이 "지금은 보내지 못했다"고 말하고
+  // 다음 방문에 다시 보낼 수 있게, 실패를 실패로 돌려준다.
+  if (!result.ok) return new Response(null, { status: 503 });
 
-  // 돌려줄 것이 없다. 화면은 보냈는지 여부만 알면 된다.
+  // 돌려줄 것이 없다. 화면은 닿았는지 여부만 알면 된다.
   return new Response(null, { status: 204 });
 }
