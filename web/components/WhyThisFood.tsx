@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useId, useState } from "react";
 
+import { AccuracyFeedback } from "@/components/AccuracyFeedback";
 import {
   MAX_PER_INGREDIENT,
   explainMatch,
@@ -141,6 +142,8 @@ export function WhyThisFood({
           >
             채점 규칙 전체 보기 →
           </Link>
+
+          <AccuracyFeedback candidate={candidate} axes={explanation.axes} />
         </div>
       )}
     </div>
