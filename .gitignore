@@ -18,5 +18,12 @@ data/processed/
 web/node_modules/
 web/.next/
 web/out/
-web/.vercel/
 next-env.d.ts
+
+# Vercel CLI가 만드는 링크·토큰. 프로젝트를 저장소 루트에 연결해 두었다 —
+# Vercel 쪽 Root Directory가 web이라 CLI도 루트에서 실행해야 경로가 맞는다.
+# `.env*`로 뭉뚱그리면 추적 중인 .env.example까지 걸려서 하나씩 적는다.
+.vercel/
+.env.local
+web/.vercel/
+web/.env.local
