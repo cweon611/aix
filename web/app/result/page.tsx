@@ -3,12 +3,14 @@ import Link from "next/link";
 import { FoodRecommendations } from "@/components/FoodRecommendations";
 import { type MapMarker } from "@/components/RegionMap";
 import { foods, streets } from "@/lib/data";
-import { streetDisplayName } from "@/lib/korean";
+import { streetDisplayName, withParticle } from "@/lib/korean";
 import {
   aggregateStreets,
+  foodsWithoutStreet,
   preferenceFromQuery,
   preferenceToQuery,
   rankCandidates,
+  substitutionNotice,
   toNearbyCandidates,
 } from "@/lib/recommend";
 import { CATEGORY_META, RAW_COLOR, SOUP_COLOR, SPICY_COLOR, SPICY_LEVELS } from "@/lib/types";
@@ -28,7 +30,14 @@ export default async function ResultPage({
   // 넘기면 "가까운 순"이 취향으로 한 번 거른 뒤의 순서가 되어 버린다.
   const ranked = rankCandidates(foods, pref);
   const candidates = toNearbyCandidates(ranked, streets, FOOD_LIMIT);
-  const topStreets = aggregateStreets(ranked.slice(0, FOOD_LIMIT), streets, 4);
+  const shown = ranked.slice(0, FOOD_LIMIT);
+  const topStreets = aggregateStreets(shown, streets, 4);
+  // 특화거리는 광주·전남에 20곳뿐이라 추천 음식 대부분은 짝이 없다. 없는 쪽은
+  // 억지로 거리를 붙이지 않고 그 음식을 파는 집으로 안내한다.
+  const shopOnly = foodsWithoutStreet(shown, streets, 3);
+  // 조건을 그대로 만족하는 음식이 없으면 목록 위에서 먼저 밝힌다. 카드마다
+  // "다만 ~"으로만 흘리면 네 장을 다 펼쳐 봐야 알 수 있다.
+  const notice = substitutionNotice(ranked, pref);
 
   // 특화거리 마커는 취향 기준으로 고정한다. 아래 "가 볼 만한 특화거리"
   // 절과 같은 목록이어야 지도와 목록이 서로를 설명한다.
@@ -94,6 +103,14 @@ export default async function ResultPage({
         <EmptyState />
       ) : (
         <>
+          {(notice.substituted || notice.outOfSeasonOnly) && (
+            <SubstitutionBanner
+              month={pref.month}
+              substituted={notice.substituted}
+              unmet={notice.unmet}
+            />
+          )}
+
           <FoodRecommendations
             candidates={candidates}
             streetMarkers={streetMarkers}
@@ -102,10 +119,12 @@ export default async function ResultPage({
             limit={FOOD_LIMIT}
           />
 
+          {topStreets.length > 0 && (
           <section className="px-5 pt-7">
             <h2 className="font-display text-[20px]">가 볼 만한 특화거리</h2>
             <p className="mt-1 text-[12px] text-fg-muted">
-              취향에 맞는 음식들이 실제로 모여 있는 거리를 득표순으로 모았습니다.
+              추천 음식을 <b className="font-bold text-fg">대표 먹거리로 내건</b> 거리만
+              모았습니다. 가깝다는 이유만으로는 넣지 않습니다.
             </p>
             <ol className="mt-3 space-y-2.5">
               {topStreets.map((agg, index) => (
@@ -143,17 +162,121 @@ export default async function ResultPage({
                 </li>
               ))}
             </ol>
-            {topStreets.length === 0 && (
-              <p className="mt-3 rounded-2xl border border-line bg-surface-alt px-4 py-6 text-center text-[13px] text-fg-muted">
-                추천된 음식과 연결되는 특화거리를 찾지 못했습니다.
-                <br />
-                취향을 조금 바꿔 보세요.
-              </p>
-            )}
           </section>
+          )}
+
+          {shopOnly.length > 0 && (
+            <section className="px-5 pt-7">
+              <h2 className="font-display text-[20px]">파는 집으로 바로 가기</h2>
+              <p className="mt-1 text-[12px] text-fg-muted">
+                {topStreets.length > 0 ? "나머지 추천은" : "이번 추천은"} 짝이 되는 특화거리가
+                없습니다. 그 음식을 실제로 파는 집을 대신 찾았습니다.
+              </p>
+              <div className="mt-3 space-y-3">
+                {shopOnly.map((entry) => (
+                  <div
+                    key={entry.food.id}
+                    className="overflow-hidden rounded-2xl border border-line bg-surface"
+                  >
+                    <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-2.5">
+                      <h3 className="font-display truncate text-[17px]">{entry.food.name}</h3>
+                      <span className="shrink-0 text-[12px] text-fg-muted">
+                        파는 곳 {entry.food.restaurantCount}곳
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-line">
+                      {entry.shops.map((shop) => (
+                        <li key={shop.id} className="flex items-center gap-3 px-4 py-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate text-[14px] font-medium text-fg">
+                                {shop.name}
+                              </span>
+                              {shop.isLocalSpecialty && (
+                                <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-bold text-brand">
+                                  향토
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-0.5 truncate text-[12px] text-fg-muted">
+                              {shop.region} {shop.area}
+                            </p>
+                          </div>
+                          <a
+                            href={`https://map.kakao.com/link/search/${encodeURIComponent(
+                              shop.address || shop.name,
+                            )}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 text-[12px] text-accent hover:underline"
+                          >
+                            길찾기
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
     </main>
+  );
+}
+
+/**
+ * 조건에 맞는 음식이 없을 때 목록 위에 세우는 알림.
+ *
+ * 점수만 보면 "취향 일치 98"이라 조건을 다 맞춘 것처럼 읽힌다. 그 점수는
+ * "상관없음"을 뺀 나머지 배점의 비율이라 조건이 어긋나도 높게 나온다. 그래서
+ * 대체 추천이라는 사실을 목록보다 먼저, 못 맞춘 조건까지 짚어서 밝힌다.
+ */
+function SubstitutionBanner({
+  month,
+  substituted,
+  unmet,
+}: {
+  month: number;
+  substituted: boolean;
+  unmet: string[];
+}) {
+  return (
+    <section className="px-5 pt-4">
+      <div
+        role="status"
+        className="rounded-2xl border border-brand/35 bg-brand-soft px-4 py-3.5"
+      >
+        <p className="text-[14px] font-bold text-brand">
+          {substituted
+            ? "조건에 맞는 음식이 없어 대체 음식을 추천합니다"
+            : `${month}월 제철 중에는 조건에 맞는 음식이 없어 앞뒤 달까지 넓혔습니다`}
+        </p>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-fg">
+          {substituted ? (
+            <>
+              {month}월 후보 중 고른 조건을 모두 만족하는 음식이 없습니다.
+              {unmet.length > 0 && (
+                <>
+                  {" "}
+                  특히 <b className="font-bold">{unmet.join("·")}</b>
+                  {withParticle(unmet[unmet.length - 1], "은/는").slice(-1)} 어떤 후보도
+                  맞추지 못했습니다.
+                </>
+              )}{" "}
+              아래는 조건에 <b className="font-bold">가장 가까운</b> 음식이며, 카드마다 어느
+              조건이 어긋났는지 ‘다만 …’으로 적어 두었습니다.
+            </>
+          ) : (
+            <>
+              조건에 맞는 음식은 있으나 {month}월 제철이 아닙니다. 앞뒤 한 달의 제철까지
+              넓혀 추천합니다.
+            </>
+          )}
+        </p>
+      </div>
+    </section>
   );
 }
 

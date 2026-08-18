@@ -288,14 +288,22 @@ function FoodCard({
         {nearby ? (
           <p className="min-w-0 truncate text-[13px] text-accent">📍 {nearby.nearest.name}</p>
         ) : (
-          candidate.bestStreet && (
+          // 대표 먹거리가 겹치는 거리가 있으면 거리로, 없으면 파는 집으로
+          // 보낸다. 식당은 상세 페이지가 없으므로 링크가 아니라 표기만 한다.
+          candidate.bestPlace &&
+          (candidate.bestPlace.kind === "street" ? (
             <Link
-              href={`/street/${candidate.bestStreet.id}?${prefQuery}`}
+              href={`/street/${candidate.bestPlace.id}?${prefQuery}`}
               className="min-w-0 truncate text-[13px] text-accent transition-colors hover:text-brand hover:underline"
             >
-              → {candidate.bestStreet.name}
+              → {candidate.bestPlace.name}
             </Link>
-          )
+          ) : (
+            <p className="min-w-0 truncate text-[13px] text-accent">
+              📍 {candidate.bestPlace.name}
+              <span className="text-fg-muted"> · {candidate.bestPlace.area}</span>
+            </p>
+          ))
         )}
       </div>
 
