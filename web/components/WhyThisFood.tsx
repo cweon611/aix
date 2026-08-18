@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useId, useState } from "react";
 
 import { AccuracyFeedback } from "@/components/AccuracyFeedback";
+import { seasonNote } from "@/lib/season-notes";
 import {
   MAX_PER_INGREDIENT,
   explainMatch,
@@ -41,6 +42,9 @@ export function WhyThisFood({
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const explanation = explainMatch(pref, candidate);
+  // 근거 문구가 없는 재료는 이 절을 아예 그리지 않는다. 빈 제목만 남기면
+  // 무언가 빠진 화면처럼 보인다.
+  const note = seasonNote(candidate.ingredient);
 
   return (
     <div className="mt-3 border-t border-line pt-2.5">
@@ -118,6 +122,24 @@ export function WhyThisFood({
             </div>
           </dl>
 
+          {note && (
+            <section className="mt-3 rounded-xl bg-accent-soft px-3 py-2.5">
+              <h4 className="text-[12px] font-bold text-accent">
+                {candidate.ingredient}, 왜 지금 이 지역인가
+              </h4>
+              <dl className="mt-1.5 space-y-1.5 text-[12px] leading-relaxed text-fg">
+                <div>
+                  <dt className="inline font-bold">왜 이 시기 </dt>
+                  <dd className="inline">{note.when}</dd>
+                </div>
+                <div>
+                  <dt className="inline font-bold">왜 광주·전남 </dt>
+                  <dd className="inline">{note.where}</dd>
+                </div>
+              </dl>
+            </section>
+          )}
+
           <ul className="mt-2.5 space-y-1 text-[11.5px] leading-relaxed text-fg-muted">
             {!candidate.inSeason && (
               <li>
@@ -131,8 +153,9 @@ export function WhyThisFood({
               </li>
             )}
             <li>
-              · 순위가 같으면 이번 달 제철인 쪽을, 그래도 같으면 파는 집이 많은 쪽을 앞에
-              둡니다. 이 음식은 {candidate.restaurantCount}곳에서 팝니다.
+              · 순위가 같으면 이번 달 제철인 쪽을 앞에 둡니다. 그래도 같으면 볼 때마다 다시
+              섞어, 같은 취향에도 다른 음식이 오릅니다. 이 음식은{" "}
+              {candidate.restaurantCount}곳에서 팝니다.
             </li>
           </ul>
 
