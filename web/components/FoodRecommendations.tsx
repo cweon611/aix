@@ -8,6 +8,7 @@ import { OptionGroup } from "@/components/OptionGroup";
 import { RegionMap, type MapMarker } from "@/components/RegionMap";
 import { TasteBadges } from "@/components/TasteChart";
 import { WhyThisFood } from "@/components/WhyThisFood";
+import { seasonNote } from "@/lib/season-notes";
 import {
   LOW_CONFIDENCE,
   MAX_PER_INGREDIENT,
@@ -260,6 +261,39 @@ export function FoodRecommendations({
 }
 
 /**
+ * 왜 지금, 왜 여기인지.
+ *
+ * 채점 설명과 따로 둔다. 접힌 패널 안에 넣었더니 눌러야만 보여서, 정작 이
+ * 서비스가 하려던 말이 가장 깊이 묻혔다. 점수는 취향이 맞는지를 말할 뿐
+ * 제철을 말하지 않으므로, 둘은 서로 다른 이야기이기도 하다.
+ *
+ * 근거 문구가 없는 재료는 절을 통째로 감춘다. 빈 제목만 남기면 무언가
+ * 빠진 화면처럼 보인다.
+ */
+function SeasonReason({ ingredient }: { ingredient: string }) {
+  const note = seasonNote(ingredient);
+  if (!note) return null;
+
+  return (
+    <section className="mt-3 rounded-xl border border-accent/25 bg-accent-soft px-3.5 py-3">
+      <h4 className="text-[12.5px] font-bold text-accent">
+        왜 지금, 왜 여기서 {ingredient}인가
+      </h4>
+      <dl className="mt-2 space-y-2 text-[12.5px] leading-relaxed text-fg">
+        <div>
+          <dt className="inline font-bold">왜 이 시기 </dt>
+          <dd className="inline">{note.when}</dd>
+        </div>
+        <div>
+          <dt className="inline font-bold">왜 광주·전남 </dt>
+          <dd className="inline">{note.where}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+/**
  * 두 정렬 모드가 같은 카드를 쓴다. 오른쪽 숫자 자리만 바뀐다 — 취향순은
  * 일치 점수, 거리순은 거리. 자리를 옮기지 않아야 토글이 다른 화면으로
  * 넘어간 것처럼 보이지 않는다.
@@ -352,6 +386,8 @@ function FoodCard({
           ※ 메뉴명 정보가 짧아 지표의 근거가 약합니다.
         </p>
       )}
+
+      <SeasonReason ingredient={candidate.ingredient} />
 
       <WhyThisFood
         candidate={candidate}
