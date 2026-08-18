@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
 
 import { OptionGroup } from "@/components/OptionGroup";
 import { RegionMap, type MapMarker } from "@/components/RegionMap";
@@ -9,6 +10,7 @@ import { TasteBadges } from "@/components/TasteChart";
 import { WhyThisFood } from "@/components/WhyThisFood";
 import {
   LOW_CONFIDENCE,
+  MAX_PER_INGREDIENT,
   formatDistance,
   rankByDistance,
   type NearbyCandidate,
@@ -66,6 +68,12 @@ export function FoodRecommendations({
 }) {
   const [sort, setSort] = useState<SortMode>("취향순");
   const [location, setLocation] = useState<LocationState>({ status: "idle" });
+
+  // 결과 화면은 요청마다 동점자를 다시 섞는다. router.refresh()로 서버에
+  // 다시 물으면 같은 취향 그대로 다른 네 가지를 받는다. 새로고침과 달리
+  // 스크롤 위치와 고른 정렬 모드가 남는다.
+  const router = useRouter();
+  const [reshuffling, startReshuffle] = useTransition();
 
   const byPreference = useMemo(() => candidates.slice(0, limit), [candidates, limit]);
 
@@ -150,7 +158,24 @@ export function FoodRecommendations({
       </section>
 
       <section className="px-5 pt-6">
-        <h2 className="font-display text-[20px]">취향에 맞는 남도 음식</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-display text-[20px]">취향에 맞는 남도 음식</h2>
+          <button
+            type="button"
+            onClick={() => startReshuffle(() => router.refresh())}
+            disabled={reshuffling}
+            className="shrink-0 cursor-pointer rounded-full border border-line-strong px-3 py-1.5 text-[12px] font-bold text-fg transition-all hover:border-brand hover:text-brand disabled:cursor-wait disabled:opacity-60"
+          >
+            <span aria-hidden="true" className="mr-1">
+              🔄
+            </span>
+            {reshuffling ? "고르는 중…" : "다른 추천 보기"}
+          </button>
+        </div>
+        <p className="mt-1 text-[12px] text-fg-muted">
+          같은 취향이라도 누를 때마다 다른 네 가지를 골라 드립니다. 점수가 같은 후보가
+          수십 가지라, 그중 무엇을 보여 줄지는 매번 새로 정합니다.
+        </p>
 
         <div className="mt-3 rounded-2xl border border-line bg-surface-alt px-4 py-3.5">
           {location.status === "ready" ? (
@@ -192,7 +217,8 @@ export function FoodRecommendations({
         {activeSort === "거리순" && (
           <p className="mt-2.5 text-[12px] text-fg-muted">
             내 위치에서 파는 집이 가까운 순입니다. 취향 점수는 순서에 넣지 않되, 같은 재료는
-            두 가지까지만 보여 줍니다.
+            {" "}
+            {MAX_PER_INGREDIENT}가지까지만 보여 줍니다.
           </p>
         )}
 
@@ -261,6 +287,13 @@ function FoodCard({
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold text-brand">{rank}</span>
             <h3 className="font-display truncate text-[21px]">{candidate.name}</h3>
+            {/* 어긋난 조건이 하나라도 있으면 이 카드는 조건 충족이 아니라 대체다.
+                상단 배너만으로는 네 장 중 어느 것이 대체인지 알 수 없다. */}
+            {candidate.mismatches.length > 0 && (
+              <span className="shrink-0 rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold text-fg-inverse">
+                대체 추천
+              </span>
+            )}
           </div>
           <p className="mt-1 text-[12px] text-fg-muted">
             {candidate.ingredient && `${candidate.ingredient} · `}
@@ -308,7 +341,10 @@ function FoodCard({
       </div>
 
       {candidate.mismatches.length > 0 && (
-        <p className="mt-2 text-[12px] text-fg-muted">다만 {candidate.mismatches.join(", ")}.</p>
+        // 배지가 "대체"라고만 말하므로, 무엇이 어긋났는지는 눈에 띄게 붙여 둔다.
+        <p className="mt-2 rounded-lg bg-brand-soft px-2.5 py-1.5 text-[12px] leading-relaxed text-fg">
+          다만 {candidate.mismatches.join(", ")}.
+        </p>
       )}
 
       {candidate.confidence < LOW_CONFIDENCE && (

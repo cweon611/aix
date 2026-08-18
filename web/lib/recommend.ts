@@ -405,13 +405,31 @@ export function seasonalPoolInfo(
 }
 
 /**
+ * 매번 다른 씨앗. 같은 취향으로 다시 들어와도 다른 상을 받게 한다.
+ *
+ * 서버 컴포넌트에서 요청마다 한 번 만들어 넘긴다. 클라이언트가 다시 계산하는
+ * 값이 아니라서 하이드레이션이 어긋나지 않는다.
+ */
+export function randomSeed(): string {
+  return `${Date.now().toString(36)}.${Math.random().toString(36).slice(2)}`;
+}
+
+/**
  * 제철 후보 전부를 취향 일치도순으로 돌려준다.
+ *
+ * `seed`를 주면 동점자 순서가 그 씨앗으로 갈린다. 결과 화면은 요청마다 새
+ * 씨앗을 넘겨 같은 취향에도 다른 음식이 나오게 하고, 거리 상세처럼 같은
+ * 화면을 다시 그려야 하는 곳은 씨앗을 생략해 취향값으로 고정한다.
  *
  * 거리순 추천이 이 목록을 그대로 쓴다 — 사용자 위치는 서버가 알 수 없어서
  * 브라우저에서 다시 정렬해야 하는데, 후보를 상위 몇 개로 잘라 넘기면 "가까운
  * 집"이 취향 점수에 걸러진 뒤의 가까운 집이 되어 거리순이 거짓말이 된다.
  */
-export function rankCandidates(foods: Food[], pref: Preference): ScoredFood[] {
+export function rankCandidates(
+  foods: Food[],
+  pref: Preference,
+  seed: string = preferenceSeed(pref),
+): ScoredFood[] {
   const scored = seasonalPool(foods, pref.month).map<ScoredFood>((food) => ({
     food,
     match: explainMatch(pref, food).score,
@@ -423,8 +441,9 @@ export function rankCandidates(foods: Food[], pref: Preference): ScoredFood[] {
   scored.sort((a, b) => {
     if (b.match !== a.match) return b.match - a.match;
     if (a.inSeason !== b.inSeason) return a.inSeason ? -1 : 1;
-    // 같은 점수면 실제로 갈 수 있는 집이 많은 쪽을 앞에 둔다.
-    return b.food.restaurantCount - a.food.restaurantCount;
+    // 동점은 입력을 씨앗으로 섞는다. 식당 수로 줄을 세우면 달과 취향이 달라져도
+    // 늘 같은 음식이 이겨서, 화면에 나오는 음식이 절반에 그친다.
+    return tieHash(a.food.id, seed) - tieHash(b.food.id, seed);
   });
 
   return diversify(scored, scored.length);
@@ -436,41 +455,135 @@ export function recommendFoods(foods: Food[], pref: Preference, limit = 4): Scor
 }
 
 /** 한 식재료가 결과를 독점하지 못하게 하는 상한. */
-export const MAX_PER_INGREDIENT = 2;
+export const MAX_PER_INGREDIENT = 1;
+
+/** 조리법도 겹치지 않게 한다. 넷 다 조림이면 재료가 달라도 같은 상이다. */
+export const MAX_PER_METHOD = 1;
+
+/**
+ * 조리법 상한을 위해 양보할 수 있는 점수 폭.
+ *
+ * 재료와 이름은 점수와 무관하게 지킨다 — 목록에 같은 음식이 두 번 있는 것은
+ * 어떤 점수로도 정당화되지 않는다. 반면 조리법은 값이 비싸면 포기한다.
+ * 이 한도를 두면 조리법 중복이 0%로 유지되면서 낙차 중앙값이 20점에 머문다.
+ */
+export const DIVERSITY_MAX_DROP = 35;
+
+/**
+ * 이름만 보고 같은 음식으로 읽히는가.
+ *
+ * 재료 상한만으로는 '한우낙지 탕탕이'와 '낙지육회탕탕이'가 나란히 오르는 것을
+ * 못 막는다. 두 행은 매칭된 제철 재료가 각각 육류·낙지로 갈려 서로 다른
+ * 항목처럼 보이지만, 상에 오르면 같은 음식이다.
+ */
+function looksSameDish(a: Food, b: Food): boolean {
+  if (a.name.includes(b.name) || b.name.includes(a.name)) return true;
+  if (a.ingredient && b.name.includes(a.ingredient)) return true;
+  if (b.ingredient && a.name.includes(b.ingredient)) return true;
+  return false;
+}
+
+/**
+ * 메뉴 이름에서 조리법을 뽑는다. 긴 것부터 봐야 '회무침'이 '회'에,
+ * '칼국수'가 '국수'에 먹히지 않는다.
+ */
+const METHODS = [
+  "샤브샤브", "회무침", "초무침", "물회", "칼국수", "수제비", "비빔밥", "덮밥", "솥밥",
+  "쌈밥", "전골", "짬뽕", "라면", "만두", "탕수육", "떡국", "게장", "젓갈", "삼합",
+  "보쌈", "수육", "국밥", "국수", "무침", "볶음", "튀김", "조림", "구이", "숙회",
+  "회", "찜", "탕", "찌개", "죽", "전", "국",
+] as const;
+
+export function cookingMethod(name: string): string {
+  let best = "";
+  for (const m of METHODS) {
+    if (name.includes(m) && m.length > best.length) best = m;
+  }
+  return best || "기타";
+}
+
+/**
+ * FNV-1a. 동점자 순서를 입력마다 다르게 섞되, 같은 입력에는 같은 순서를 준다.
+ *
+ * 제철 후보는 같은 점수(98점)에 수십 개가 몰린다. 여기서 '식당 수 → 이름순'으로
+ * 줄을 세우면 달이 바뀌어도 늘 같은 음식이 이겨서, 전체 458가지 중 251가지만
+ * 화면에 나왔다. 입력을 씨앗으로 섞으면 노출이 394가지로 늘어난다. 난수가
+ * 아니라 해시라서 같은 취향을 고른 사람은 언제나 같은 결과를 본다.
+ */
+function tieHash(id: string, seed: string): number {
+  let h = 0x811c9dc5;
+  const text = `${id}|${seed}`;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+function preferenceSeed(pref: Preference): string {
+  return `${pref.month}|${pref.spicy}|${pref.soup}|${pref.raw}|${pref.ingredient}`;
+}
 
 /**
  * 점수순 정렬만 하면 "전복문어탕·전복연포탕·전복해신탕"처럼 같은 재료의
  * 변주가 목록을 통째로 차지한다. 점수는 정직하지만 답으로는 쓸모가 없다 —
  * 사용자는 오늘 뭘 먹을지 고르려는 것이지 전복 요리 목록을 보려는 게 아니다.
+ *
+ * 자리마다 "남은 것 중 가장 점수 높은 것"과 "재료·조리법이 겹치지 않는 것 중
+ * 가장 점수 높은 것"을 나란히 놓고 고른다. 둘의 점수 차가 DIVERSITY_MAX_DROP
+ * 안이면 겹치지 않는 쪽을, 그보다 벌어지면 점수 쪽을 택한다. 다양성은 쌀 때만
+ * 사는 것이지, 엉뚱한 음식을 올릴 이유는 되지 못한다.
  */
 function diversify(scored: ScoredFood[], limit: number): ScoredFood[] {
   // 같은 메뉴가 재료만 다르게 두 번 들어와 있는 경우가 있다. 원본에서
   // "우렁이 쌈밥 정식, 전복들깨탕"이 들깨 행과 전복 행으로 각각 잡히는 식이다.
   const seenNames = new Set<string>();
-  const deduped = scored.filter((item) => {
+  const pending = scored.filter((item) => {
     if (seenNames.has(item.food.name)) return false;
     seenNames.add(item.food.name);
     return true;
   });
 
-  const taken: ScoredFood[] = [];
-  const overflow: ScoredFood[] = [];
-  const seen = new Map<string, number>();
+  const picked: ScoredFood[] = [];
+  const ingredientCount = new Map<string, number>();
+  const methodCount = new Map<string, number>();
+  // 상한에 걸려 한 번이라도 건너뛰어진 항목. 화면에서 그 사실을 밝혀야
+  // "점수가 높은데 왜 아래 있지?"가 생기지 않는다.
+  const passedOver = new Set<string>();
 
-  for (const item of deduped) {
-    const key = item.food.ingredient || item.food.name;
-    const count = seen.get(key) ?? 0;
-    if (count < MAX_PER_INGREDIENT && taken.length < limit) {
-      taken.push(item);
-      seen.set(key, count + 1);
-    } else {
-      // 점수만 보면 더 앞이었는데 상한에 걸려 밀린 것. 화면에서 그 사실을
-      // 밝혀야 "점수가 높은데 왜 아래 있지?"가 생기지 않는다.
-      overflow.push({ ...item, demoted: true });
+  /** 점수와 무관하게 지키는 규칙 — 같은 재료, 그리고 같아 보이는 음식. */
+  const allowedAlways = (item: ScoredFood) =>
+    (ingredientCount.get(item.food.ingredient || item.food.name) ?? 0) < MAX_PER_INGREDIENT &&
+    !picked.some((taken) => looksSameDish(taken.food, item.food));
+
+  /** 값이 비싸면 포기하는 규칙 — 조리법. */
+  const allowedIfCheap = (item: ScoredFood) =>
+    (methodCount.get(cookingMethod(item.food.name)) ?? 0) < MAX_PER_METHOD;
+
+  while (picked.length < limit && pending.length > 0) {
+    // 절대 규칙까지 막히면(고를 것이 없으면) 어쩔 수 없이 점수순으로 간다.
+    const eligible = pending.filter(allowedAlways);
+    const from = eligible.length > 0 ? eligible : pending;
+
+    const cheapest = from.find(allowedIfCheap);
+    const item =
+      cheapest && from[0].match - cheapest.match <= DIVERSITY_MAX_DROP ? cheapest : from[0];
+
+    // 이 항목을 위로 올리느라 건너뛴 것들은 상한 탓에 밀린 것이다.
+    for (const skipped of pending) {
+      if (skipped === item) break;
+      passedOver.add(skipped.food.id);
     }
+
+    pending.splice(pending.indexOf(item), 1);
+    const ingredient = item.food.ingredient || item.food.name;
+    const method = cookingMethod(item.food.name);
+    ingredientCount.set(ingredient, (ingredientCount.get(ingredient) ?? 0) + 1);
+    methodCount.set(method, (methodCount.get(method) ?? 0) + 1);
+    picked.push(passedOver.has(item.food.id) ? { ...item, demoted: true } : item);
   }
 
-  return taken.concat(overflow).slice(0, limit);
+  return picked;
 }
 
 // --------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import {
   foodsWithoutStreet,
   preferenceFromQuery,
   preferenceToQuery,
+  randomSeed,
   rankCandidates,
   substitutionNotice,
   toNearbyCandidates,
@@ -17,6 +18,10 @@ import { CATEGORY_META, RAW_COLOR, SOUP_COLOR, SPICY_COLOR, SPICY_LEVELS } from 
 
 /** 결과에 보여 줄 음식 개수. */
 const FOOD_LIMIT = 4;
+
+// 매번 다르게 뽑으므로 캐시에 걸리면 안 된다. 캐시된 응답을 다시 주면
+// 새로고침해도 같은 상이 나와, 다르게 나오게 한 뜻이 사라진다.
+export const dynamic = "force-dynamic";
 
 export default async function ResultPage({
   searchParams,
@@ -28,7 +33,8 @@ export default async function ResultPage({
 
   // 제철 후보를 전부 취향순으로 세워 클라이언트로 넘긴다. 상위 몇 개만
   // 넘기면 "가까운 순"이 취향으로 한 번 거른 뒤의 순서가 되어 버린다.
-  const ranked = rankCandidates(foods, pref);
+  // 요청마다 새 씨앗을 준다. 같은 취향으로 다시 들어와도 다른 상을 받는다.
+  const ranked = rankCandidates(foods, pref, randomSeed());
   const candidates = toNearbyCandidates(ranked, streets, FOOD_LIMIT);
   const shown = ranked.slice(0, FOOD_LIMIT);
   const topStreets = aggregateStreets(shown, streets, 4);
@@ -141,9 +147,11 @@ export default async function ResultPage({
                         <h3 className="font-display truncate text-[18px]">
                           {streetDisplayName(agg.street)}
                         </h3>
-                        <span className="shrink-0 text-[12px] text-fg-muted">
-                          점포 {agg.street.shopCount}곳
-                        </span>
+                        {agg.street.shopCount > 0 && (
+                          <span className="shrink-0 text-[12px] text-fg-muted">
+                            점포 {agg.street.shopCount}곳
+                          </span>
+                        )}
                       </div>
                       <p className="mt-0.5 text-[12px] text-fg-muted">
                         {agg.street.sido} {agg.street.sigungu}
@@ -245,33 +253,44 @@ function SubstitutionBanner({
   return (
     <section className="px-5 pt-4">
       <div
-        role="status"
-        className="rounded-2xl border border-brand/35 bg-brand-soft px-4 py-3.5"
+        role="alert"
+        className="overflow-hidden rounded-2xl border-2 border-brand bg-surface"
       >
-        <p className="text-[14px] font-bold text-brand">
-          {substituted
-            ? "조건에 맞는 음식이 없어 대체 음식을 추천합니다"
-            : `${month}월 제철 중에는 조건에 맞는 음식이 없어 앞뒤 달까지 넓혔습니다`}
-        </p>
-        <p className="mt-1.5 text-[12px] leading-relaxed text-fg">
+        <div className="flex items-start gap-2.5 bg-brand px-4 py-3">
+          <span aria-hidden="true" className="text-[20px] leading-none">
+            ⚠️
+          </span>
+          <div className="min-w-0">
+            <p className="font-display text-[19px] leading-tight text-fg-inverse">
+              대체 추천입니다
+            </p>
+            <p className="mt-1 text-[13px] font-bold leading-snug text-fg-inverse">
+              {substituted
+                ? "고른 조건에 맞는 음식이 없습니다"
+                : `${month}월 제철 중에는 조건에 맞는 음식이 없습니다`}
+            </p>
+          </div>
+        </div>
+        <p className="px-4 py-3 text-[12px] leading-relaxed text-fg">
           {substituted ? (
             <>
-              {month}월 후보 중 고른 조건을 모두 만족하는 음식이 없습니다.
+              {month}월 후보 중 <b className="font-bold">조건을 모두 만족하는 음식이 하나도 없어</b>,
+              아래는 조건에 <b className="font-bold">가장 가까운 음식</b>을 대신 고른 것입니다.
               {unmet.length > 0 && (
                 <>
                   {" "}
-                  특히 <b className="font-bold">{unmet.join("·")}</b>
+                  특히 <b className="font-bold text-brand">{unmet.join("·")}</b>
                   {withParticle(unmet[unmet.length - 1], "은/는").slice(-1)} 어떤 후보도
                   맞추지 못했습니다.
                 </>
               )}{" "}
-              아래는 조건에 <b className="font-bold">가장 가까운</b> 음식이며, 카드마다 어느
-              조건이 어긋났는지 ‘다만 …’으로 적어 두었습니다.
+              카드의 <b className="font-bold text-brand">대체 추천</b> 표시와 ‘다만 …’ 줄에서
+              어느 조건이 어긋났는지 확인하실 수 있습니다.
             </>
           ) : (
             <>
               조건에 맞는 음식은 있으나 {month}월 제철이 아닙니다. 앞뒤 한 달의 제철까지
-              넓혀 추천합니다.
+              넓혀 <b className="font-bold">대신 추천</b>합니다.
             </>
           )}
         </p>
