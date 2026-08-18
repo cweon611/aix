@@ -92,18 +92,34 @@ export default async function StreetPage({
 
       <section className="px-5 pt-4">
         <RegionMap markers={markers} height={220} />
-        {street.coordSource !== "원본" && (
+        {/* 좌표가 아예 없는 것과 주소로 채워 넣은 것은 다르다. 뭉뚱그리면
+            지도에 아무것도 없는 화면에 "보정한 위치입니다"가 붙는다. */}
+        {street.coordSource === "주소기반보정" && (
           <p className="mt-1.5 text-[11px] text-fg-muted">
             ※ 원본 데이터에 좌표가 없어 주소를 기준으로 보정한 위치입니다.
+          </p>
+        )}
+        {street.lat === null && (
+          <p className="mt-1.5 text-[11px] text-fg-muted">
+            ※ 좌표가 없어 지도에 위치를 찍지 못했습니다. 아래 ‘지도에서 이 거리 열기’로
+            주소를 확인하실 수 있습니다.
           </p>
         )}
       </section>
 
       <section className="grid grid-cols-3 gap-2 px-5 pt-4">
-        <Stat label="점포" value={`${street.shopCount}곳`} />
+        {/* 0은 "점포가 없다"가 아니라 "모른다"이다. 세어 본 적 없는 값을
+            0곳으로 적으면 없는 사실을 만들어 낸다. */}
+        <Stat label="점포" value={street.shopCount > 0 ? `${street.shopCount}곳` : "-"} />
         <Stat
           label="길이"
-          value={street.lengthM >= 1000 ? `${(street.lengthM / 1000).toFixed(1)} km` : `${street.lengthM} m`}
+          value={
+            street.lengthM <= 0
+              ? "-"
+              : street.lengthM >= 1000
+                ? `${(street.lengthM / 1000).toFixed(1)} km`
+                : `${street.lengthM} m`
+          }
         />
         <Stat label="지정" value={street.designatedYear ? `${street.designatedYear}년` : "-"} />
       </section>
@@ -212,11 +228,19 @@ export default async function StreetPage({
       </section>
 
       <footer className="px-6 pt-6 text-[11px] leading-relaxed text-fg-muted">
+        {street.orgName && (
+          <p>
+            관리기관 {street.orgName}
+            {street.orgTel && ` · ${street.orgTel}`}
+          </p>
+        )}
+        {/* 공공데이터에 없어 직접 넣은 거리가 있다. 출처를 싸잡아 적으면
+            공공데이터가 보증하지 않는 항목까지 보증하는 것처럼 읽힌다. */}
         <p>
-          관리기관 {street.orgName}
-          {street.orgTel && ` · ${street.orgTel}`}
+          {street.dataDate
+            ? `공공데이터포털 지역특화거리 ${street.dataDate} 기준`
+            : "공공데이터 지역특화거리 목록에는 없어 직접 추가한 거리입니다. 점포수·길이·지정연도 정보가 없습니다."}
         </p>
-        <p>공공데이터포털 지역특화거리 {street.dataDate} 기준</p>
       </footer>
     </main>
   );
