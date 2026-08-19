@@ -29,12 +29,6 @@ export default function TastePage() {
       <TasteTextEntry defaultMonth={month} />
 
       <footer className="px-6 pb-10 text-[11px] leading-relaxed text-fg-muted">
-        <Link
-          href="/how"
-          className="mb-4 block rounded-2xl border border-line bg-surface px-4 py-3 text-[13px] font-bold text-accent transition-colors hover:border-line-strong hover:text-brand"
-        >
-          이 취향이 점수로 어떻게 바뀌나요? →
-        </Link>
         <p className="font-bold text-fg">데이터 출처</p>
         <ul className="mt-1.5 space-y-0.5">
           {meta.sources.map((s) => (
