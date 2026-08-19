@@ -662,17 +662,15 @@ export function matchStreets(food: Food, streets: Street[], limit = 3): StreetMa
     const hit = keywordHit(food, street);
     if (!hit) continue;
 
-    const reasons: string[] = [`${hit.keyword} 전문 거리`];
-    let score = hit.score;
-
+    // 같은 시·군·구에 있는 거리만 붙인다. 키워드만 보면 순천에서 파는 표고
+    // 골동면이 '표고' 때문에 여수 거리에, 여수 전복순두부가 '전복' 때문에
+    // 완도 거리에 붙는다. 카드에 뜬 지역과 거리가 어긋나면, 그건 갈 수 없는
+    // 안내다. 재료가 겹쳐도 그 동네 거리가 아니면 소용없다.
     const sameSigungu = food.regions.some((r) => street.sigungu && r.includes(street.sigungu));
-    const sameSido = food.regions.some((r) => r.startsWith(street.sido));
-    if (sameSigungu) {
-      score += 30;
-      reasons.push(`${street.sigungu} 안에 있음`);
-    } else if (sameSido) {
-      score += 10;
-    }
+    if (!sameSigungu) continue;
+
+    const reasons: string[] = [`${hit.keyword} 전문 거리`, `${street.sigungu} 안에 있음`];
+    let score = hit.score + 30;
 
     let distanceKm: number | null = null;
     if (street.lat !== null && street.lon !== null && coords.length > 0) {
