@@ -12,6 +12,7 @@ import {
   preferenceToQuery,
   recommendFoods,
 } from "@/lib/recommend";
+import { nearbyTourism } from "@/lib/tourism";
 import type { Food } from "@/lib/types";
 
 export function generateStaticParams() {
@@ -91,7 +92,14 @@ export default async function StreetPage({
         </div>
       </header>
 
-      <StreetMapPanel baseMarkers={markers} nearby={street.nearby} />
+      <StreetMapPanel
+        baseMarkers={markers}
+        nearby={
+          street.lat !== null && street.lon !== null
+            ? nearbyTourism({ lat: street.lat, lon: street.lon }, { limit: 8 })
+            : []
+        }
+      />
 
       <section className="px-5 pt-3">
         {street.coordSource === "주소기반보정" && (

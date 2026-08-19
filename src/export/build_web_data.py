@@ -199,23 +199,22 @@ def build_foods() -> list[dict]:
 NEARBY_TOURISM = DATA_PROCESSED_DIR / "nearby_tourism.json"
 
 
-def _load_nearby() -> dict:
-    """거리별 주변 관광지. 파일이 없으면(수집 전) 빈 채로 둔다 — 화면은 그때
-    '주변 관광 정보 탐색' 절을 아예 감춘다."""
+def build_tourism() -> list[dict]:
+    """전남·광주 관광지 풀. 웹이 어느 지점에서든 거리를 재 가까운 명소를 뽑는다.
+
+    수집기가 만든 평평한 배열을 그대로 내려보내되, http 이미지를 https로 올린다.
+    파일이 없으면(수집 전) 빈 목록 — 화면은 그때 '주변 관광' 절을 감춘다."""
     if not NEARBY_TOURISM.exists():
-        print("  주변 관광 데이터 없음(nearby_tourism.json). 관광지 없이 빌드합니다.")
-        return {}
-    data = json.loads(NEARBY_TOURISM.read_text(encoding="utf-8"))
-    # TourAPI 이미지는 http로 온다. https 배포에서 혼합콘텐츠로 막히므로 올린다.
-    for spots in data.values():
-        for s in spots:
-            if s.get("image", "").startswith("http://"):
-                s["image"] = "https://" + s["image"][len("http://"):]
-    return data
+        print("  주변 관광 데이터 없음(nearby_tourism.json). 관광명소 없이 빌드합니다.")
+        return []
+    spots = json.loads(NEARBY_TOURISM.read_text(encoding="utf-8"))
+    for s in spots:
+        if s.get("image", "").startswith("http://"):
+            s["image"] = "https://" + s["image"][len("http://"):]
+    return spots
 
 
 def build_streets() -> list[dict]:
-    nearby = _load_nearby()
     out = []
     for row in _read(STREETS):
         lat, lon = _to_float(row.get("lat")), _to_float(row.get("lon"))
@@ -237,8 +236,6 @@ def build_streets() -> list[dict]:
             "orgName": row["org_name"],
             "orgTel": row["org_tel"],
             "dataDate": row["data_date"],
-            # 반경 5km 안의 관광지·문화시설. 좌표 없는 거리는 빈 목록.
-            "nearby": nearby.get(row["street_id"], []),
         })
     return out
 
@@ -246,6 +243,7 @@ def build_streets() -> list[dict]:
 def main() -> None:
     foods = build_foods()
     streets = build_streets()
+    tourism = build_tourism()
 
     meta = {
         "builtAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -261,7 +259,9 @@ def main() -> None:
     }
 
     WEB_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    for name, payload in (("foods", foods), ("streets", streets), ("meta", meta)):
+    for name, payload in (
+        ("foods", foods), ("streets", streets), ("tourism", tourism), ("meta", meta)
+    ):
         path = WEB_DATA_DIR / f"{name}.json"
         with path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))

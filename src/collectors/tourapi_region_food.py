@@ -135,6 +135,34 @@ LIST_FIELDS = ["contentid", "title", "addr1", "addr2", "tel", "mapx", "mapy",
                "firstimage", "lDongRegnCd", "lDongSignguCd", "modifiedtime"]
 
 
+def fetch_area_list(region_code: str, content_type_id: int, page_size: int = 100,
+                    max_pages: int = 200) -> list[dict]:
+    """한 시도에서 주어진 콘텐츠 유형의 목록 전체. 음식점(39)뿐 아니라
+    관광지(12)·문화시설(14) 등에도 그대로 쓴다."""
+    rows: list[dict] = []
+    total = None
+
+    for page_no in range(1, max_pages + 1):
+        body = _get("areaBasedList2",
+                    numOfRows=page_size, pageNo=page_no, arrange="C",
+                    contentTypeId=content_type_id, lDongRegnCd=region_code)
+        items = _items(body)
+        if not items:
+            break
+        for it in items:
+            rows.append({f: str(it.get(f) or "").strip() for f in LIST_FIELDS})
+        if total is None:
+            try:
+                total = int(body.get("totalCount") or 0)
+            except (TypeError, ValueError):
+                total = 0
+        if total and len(rows) >= total:
+            break
+    else:
+        print(f"  경고: max_pages({max_pages}) 도달, 데이터가 더 남았을 수 있습니다.")
+    return rows
+
+
 def fetch_restaurants(region_code: str, page_size: int = 100,
                       max_pages: int = 200) -> list[dict]:
     """한 시도의 음식점(contentTypeId=39) 목록 전체."""

@@ -38,7 +38,7 @@ export function StreetMapPanel({
   );
 
   const markers = showNearby ? [...baseMarkers, ...nearbyMarkers] : baseMarkers;
-  const hasMap = baseMarkers.some((m) => m.kind === "street");
+  const hasMap = baseMarkers.length > 0;
 
   return (
     <>
@@ -72,7 +72,7 @@ export function StreetMapPanel({
                   🧭 주변 관광 정보 탐색
                 </span>
                 <span className="mt-0.5 block text-[12px] text-fg-muted">
-                  이 거리 반경 5km 안의 관광지 {nearby.length}곳
+                  여기서 가까운 인기 관광명소 {nearby.length}곳
                 </span>
               </span>
               <span
@@ -116,14 +116,19 @@ export function StreetMapPanel({
                             {p.dist >= 1000 ? `${(p.dist / 1000).toFixed(1)}km` : `${p.dist}m`}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-[11px] text-texture">{p.type}</p>
+                        <p className="mt-0.5 text-[11px] text-texture">
+                          {p.type}
+                          {p.popularity > 0 && (
+                            <span className="text-fg-muted"> · 인기 {p.popularity}%</span>
+                          )}
+                        </p>
                         <p className="mt-0.5 truncate text-[12px] text-fg-muted">{p.addr}</p>
                       </div>
                     </a>
                   </li>
                 ))}
                 <li className="px-1 pt-0.5 text-[11px] text-fg-muted">
-                  한국관광공사 TourAPI · 이 거리에서 가까운 순
+                  전남 인기 관광명소 · 위치는 한국관광공사 TourAPI · 여기서 가까운 순
                 </li>
               </ul>
             )}
