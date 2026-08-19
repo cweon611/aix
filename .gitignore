@@ -4,11 +4,20 @@ __pycache__/
 *.pyc
 # 디렉터리째 제외하면 안쪽 파일을 되살릴 수 없어서 `dir/*` 형태로 쓴다.
 data/raw/*
-data/processed/
+data/processed/*
 
 # 특화거리 원본만 예외. 7KB 공개 데이터이고, 이게 없으면 클론한 사람이
 # build_streets.py를 돌릴 수 없다. 나머지 raw는 API로 다시 받으면 된다.
 !data/raw/광주전남_지역특화거리_통합데이터.csv
+
+# 맛 프로파일은 예외. 나머지 처리물은 파이프라인을 돌리면 되살아나지만
+# 이 표에는 사람이 직접 내린 판단이 들어 있다 — 비슷한 메뉴를 하나로 합치고,
+# 맵기·날것을 눈으로 고쳐 넣은 결과다. 저장소 밖에 두면 파이프라인을 다시
+# 돌리는 순간 조용히 사라진다. 사라지면 다시 만들 방법이 없다.
+# xlsx는 그 검수를 실제로 하는 자리라 함께 둔다(수십 KB).
+!data/processed/menu_taste_profile.csv
+!data/processed/menu_taste_profile_excluded.csv
+!data/processed/menu_taste_profile.xlsx
 
 # 로컬 전용 설정
 .claude/settings.local.json

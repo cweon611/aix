@@ -56,6 +56,25 @@ export interface Food {
   restaurants: Restaurant[];
 }
 
+/** 거리에서 가까운 인기 관광명소. 큐레이션 목록(전남인기관광명소)에 좌표를
+ *  TourAPI로 붙여 빌드 시점에 굳힌다. */
+export interface NearbyPlace {
+  id: string;
+  title: string;
+  /** 구분: "관광명소" | "종교" | "레저/스포츠" | "문화생활시설" 등 */
+  type: string;
+  /** 인기 비율(%). 큐레이션 목록이 준 값. */
+  popularity: number;
+  addr: string;
+  /** 거리 지점에서 몇 m */
+  dist: number;
+  lat: number | null;
+  lon: number | null;
+  /** 대표 이미지 URL. 없을 수 있다. */
+  image: string;
+  tel: string;
+}
+
 export interface Street {
   id: string;
   name: string;
