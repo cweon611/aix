@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { RegionMap, type MapMarker } from "@/components/RegionMap";
+import { type MapMarker } from "@/components/RegionMap";
+import { StreetMapPanel } from "@/components/StreetMapPanel";
 import { TasteBadges } from "@/components/TasteChart";
 import { findStreet, foods, streets } from "@/lib/data";
 import { streetDisplayName } from "@/lib/korean";
@@ -74,40 +75,39 @@ export default async function StreetPage({
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-[520px] bg-canvas pb-12">
-      <header className="bg-ink px-6 pb-5 pt-11 text-fg-inverse">
-        <Link
-          href={`/result?${preferenceToQuery(pref)}`}
-          className="block w-fit text-[13px] text-[#b8afa6] hover:text-fg-inverse"
-        >
-          ← 추천 목록
-        </Link>
-        <span className="mt-3 block w-fit rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-bold text-brand">
-          {street.category} 특화거리
-        </span>
-        <h1 className="font-display mt-2 text-[26px] leading-tight">
-          {streetDisplayName(street)}
-        </h1>
-        <p className="mt-1.5 text-[13px] text-[#b8afa6]">{street.address}</p>
+      {/* 지도가 주인공이라 헤더는 얇은 앱바로 줄인다. */}
+      <header className="bg-ink px-5 py-3 text-fg-inverse">
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            href={`/result?${preferenceToQuery(pref)}`}
+            className="shrink-0 text-[13px] text-[#b8afa6] hover:text-fg-inverse"
+          >
+            ← 추천 목록
+          </Link>
+          <h1 className="font-display truncate text-[16px]">{streetDisplayName(street)}</h1>
+          <span className="shrink-0 rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-bold text-brand">
+            {street.category}
+          </span>
+        </div>
       </header>
 
-      <section className="px-5 pt-4">
-        <RegionMap markers={markers} height={220} />
-        {/* 좌표가 아예 없는 것과 주소로 채워 넣은 것은 다르다. 뭉뚱그리면
-            지도에 아무것도 없는 화면에 "보정한 위치입니다"가 붙는다. */}
+      <StreetMapPanel baseMarkers={markers} nearby={street.nearby} />
+
+      <section className="px-5 pt-3">
         {street.coordSource === "주소기반보정" && (
-          <p className="mt-1.5 text-[11px] text-fg-muted">
-            ※ 원본 데이터에 좌표가 없어 주소를 기준으로 보정한 위치입니다.
+          <p className="mb-2 text-[11px] text-fg-muted">
+            ※ 원본에 좌표가 없어 주소를 기준으로 보정한 위치입니다.
           </p>
         )}
         {street.lat === null && (
-          <p className="mt-1.5 text-[11px] text-fg-muted">
-            ※ 좌표가 없어 지도에 위치를 찍지 못했습니다. 아래 ‘지도에서 이 거리 열기’로
-            주소를 확인하실 수 있습니다.
+          <p className="mb-2 text-[11px] text-fg-muted">
+            ※ 좌표가 없어 지도에 위치를 찍지 못했습니다. 아래 주소로 확인해 주세요.
           </p>
         )}
+        <p className="text-[13px] text-fg-muted">{street.address}</p>
       </section>
 
-      <section className="grid grid-cols-3 gap-2 px-5 pt-4">
+      <section className="grid grid-cols-3 gap-2 px-5 pt-3">
         {/* 0은 "점포가 없다"가 아니라 "모른다"이다. 세어 본 적 없는 값을
             0곳으로 적으면 없는 사실을 만들어 낸다. */}
         <Stat label="점포" value={street.shopCount > 0 ? `${street.shopCount}곳` : "-"} />

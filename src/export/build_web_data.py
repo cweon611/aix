@@ -196,7 +196,26 @@ def build_foods() -> list[dict]:
     return foods
 
 
+NEARBY_TOURISM = DATA_PROCESSED_DIR / "nearby_tourism.json"
+
+
+def _load_nearby() -> dict:
+    """거리별 주변 관광지. 파일이 없으면(수집 전) 빈 채로 둔다 — 화면은 그때
+    '주변 관광 정보 탐색' 절을 아예 감춘다."""
+    if not NEARBY_TOURISM.exists():
+        print("  주변 관광 데이터 없음(nearby_tourism.json). 관광지 없이 빌드합니다.")
+        return {}
+    data = json.loads(NEARBY_TOURISM.read_text(encoding="utf-8"))
+    # TourAPI 이미지는 http로 온다. https 배포에서 혼합콘텐츠로 막히므로 올린다.
+    for spots in data.values():
+        for s in spots:
+            if s.get("image", "").startswith("http://"):
+                s["image"] = "https://" + s["image"][len("http://"):]
+    return data
+
+
 def build_streets() -> list[dict]:
+    nearby = _load_nearby()
     out = []
     for row in _read(STREETS):
         lat, lon = _to_float(row.get("lat")), _to_float(row.get("lon"))
@@ -218,6 +237,8 @@ def build_streets() -> list[dict]:
             "orgName": row["org_name"],
             "orgTel": row["org_tel"],
             "dataDate": row["data_date"],
+            # 반경 5km 안의 관광지·문화시설. 좌표 없는 거리는 빈 목록.
+            "nearby": nearby.get(row["street_id"], []),
         })
     return out
 

@@ -10,7 +10,7 @@ export interface MapMarker {
   lat: number;
   lon: number;
   label: string;
-  kind: "street" | "restaurant" | "me";
+  kind: "street" | "restaurant" | "me" | "tourism";
   /** 강조할 마커. 라벨을 항상 띄운다. */
   highlight?: boolean;
 }
@@ -20,11 +20,14 @@ const RESTAURANT_COLOR = "#1f5f52";
 // 내 위치는 추천 지점과 다른 계열의 색이어야 한다. 같은 붉은·초록 계열이면
 // "가까운 집"과 "나"가 지도에서 섞여 보인다.
 const ME_COLOR = "#2e6e8e";
+// 관광지는 음식·거리와 또 다른 계열(보라)로 둔다.
+const TOURISM_COLOR = "#6b4a8f";
 
 const MARKER_COLOR: Record<MapMarker["kind"], string> = {
   street: STREET_COLOR,
   restaurant: RESTAURANT_COLOR,
   me: ME_COLOR,
+  tourism: TOURISM_COLOR,
 };
 
 function buildDivIcon(
