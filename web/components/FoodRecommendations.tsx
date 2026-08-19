@@ -109,11 +109,29 @@ export function FoodRecommendations({
   // 위치를 못 받은 동안에는 거리순을 고를 수 없으므로 취향순으로 되돌린다.
   const activeSort: SortMode = location.status === "ready" ? sort : "취향순";
 
-  // 지도 핀은 특화거리다. 음식 정보는 아래 시트에 다 있으니, 지도는 "가서
-  // 먹을 수 있는 거리"를 보여 주고 누르면 그 거리 상세로 넘어간다. 파는 집
-  // 좌표까지 핀으로 찍으면 지도가 점으로 뒤덮여 거리 핀이 묻힌다.
+  // 추천 음식마다 대표 파는 집 하나를 핀으로 찍는다. id를 식당 id로 두어야
+  // 핀을 눌러 식당 상세로 갈 수 있다. 같은 집이 여러 음식에 걸리면 한 번만.
+  const foodMarkers = useMemo<MapMarker[]>(() => {
+    const rows =
+      activeSort === "거리순"
+        ? byDistance
+            .filter((d) => d.candidate.spots.length > 0)
+            .map((d) => ({ name: d.candidate.name, spot: d.nearest }))
+        : byPreference
+            .filter((c) => c.spots.length > 0)
+            .map((c) => ({ name: c.name, spot: c.spots[0] }));
+    const seen = new Set<string>();
+    const out: MapMarker[] = [];
+    for (const r of rows) {
+      if (!r.spot.id || seen.has(r.spot.id)) continue;
+      seen.add(r.spot.id);
+      out.push({ id: r.spot.id, lat: r.spot.lat, lon: r.spot.lon, label: r.name, kind: "restaurant" });
+    }
+    return out;
+  }, [activeSort, byDistance, byPreference]);
+
   const markers = useMemo<MapMarker[]>(() => {
-    const list: MapMarker[] = [...streetMarkers];
+    const list: MapMarker[] = [...streetMarkers, ...foodMarkers];
     if (location.status === "ready") {
       list.push({
         id: "me",
@@ -125,11 +143,11 @@ export function FoodRecommendations({
       });
     }
     return list;
-  }, [streetMarkers, location]);
+  }, [streetMarkers, foodMarkers, location]);
 
-  // 거리 핀을 누르면 그 거리 상세로 간다. 거리·점포 정보는 거기서만 본다.
-  const openStreet = (id: string) => {
-    router.push(`/street/${id}?${prefQuery}`);
+  // 핀을 누르면 상세로 간다. 특화거리(ST…)는 거리 상세, 식당은 식당 상세로.
+  const openPin = (id: string) => {
+    router.push(id.startsWith("ST") ? `/street/${id}?${prefQuery}` : `/restaurant/${id}?${prefQuery}`);
   };
 
   function requestLocation() {
@@ -163,18 +181,15 @@ export function FoodRecommendations({
       {/* 히어로 지도. 화면을 크게 차지해 이 화면이 지도임을 먼저 보여 준다.
           아래 시트가 살짝 겹쳐 올라와 바텀시트처럼 읽힌다. */}
       <section className="relative h-[56vh] w-full">
-        {streetMarkers.length > 0 ? (
-          <RegionMap markers={markers} height="100%" onSelect={openStreet} />
+        {streetMarkers.length + foodMarkers.length > 0 ? (
+          <RegionMap markers={markers} height="100%" onSelect={openPin} />
         ) : (
-          // 추천 넷이 특화거리와 이어지지 않으면 찍을 핀이 없다. 빈 지도를
+          // 좌표 있는 파는 집도 특화거리도 없으면 찍을 핀이 없다. 빈 지도를
           // 내미는 대신, 아래 목록으로 눈을 돌리게 한다.
           <div className="flex h-full flex-col items-center justify-center bg-accent-soft px-8 text-center">
-            <p className="font-display text-[18px] text-fg">
-              이번 추천과 이어지는 특화거리가 없습니다
-            </p>
+            <p className="font-display text-[18px] text-fg">지도에 찍을 위치가 없습니다</p>
             <p className="mt-2 text-[13px] leading-relaxed text-fg-muted">
-              아래에서 추천 음식을 확인하세요. ‘다른 추천 보기’를 누르면 거리가 있는
-              다른 조합이 나올 수 있습니다.
+              아래에서 추천 음식을 확인하세요.
             </p>
           </div>
         )}
@@ -185,8 +200,9 @@ export function FoodRecommendations({
       <section className="relative z-10 -mt-5 rounded-t-3xl border-t border-line bg-canvas px-5 pb-2 pt-3 shadow-[0_-10px_30px_rgba(28,24,21,0.12)]">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" aria-hidden="true" />
         <p className="text-[11px] text-fg-muted">
-          <span className="font-bold text-brand">●</span> 특화거리 — 누르면 그 거리에서
-          파는 곳과 상세를 볼 수 있습니다.
+          <span className="font-bold text-accent">●</span> 파는 집 ·{" "}
+          <span className="font-bold text-brand">●</span> 특화거리 — 핀을 누르면 상세와 주변
+          관광까지 볼 수 있습니다.
           {location.status === "ready" && (
             <>
               {" "}

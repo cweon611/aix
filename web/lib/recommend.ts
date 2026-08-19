@@ -770,6 +770,8 @@ export function foodsWithoutStreet(
 
 /** 그 음식을 실제로 파는 집 중 좌표가 있는 곳. */
 export interface FoodSpot {
+  /** 식당 id. 핀을 눌러 식당 상세로 갈 때 쓴다. */
+  id: string;
   name: string;
   area: string;
   lat: number;
@@ -869,6 +871,7 @@ export function toNearbyCandidates(
       spots: item.food.restaurants
         .filter((r) => r.lat !== null && r.lon !== null)
         .map((r) => ({
+          id: r.id,
           name: r.name,
           area: r.area,
           lat: r.lat as number,
