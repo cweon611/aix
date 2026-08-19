@@ -6,7 +6,6 @@ import { foods, streets } from "@/lib/data";
 import { streetDisplayName, withParticle } from "@/lib/korean";
 import {
   aggregateStreets,
-  foodsWithoutStreet,
   preferenceFromQuery,
   preferenceToQuery,
   randomSeed,
@@ -40,10 +39,9 @@ export default async function ResultPage({
   const ranked = rankCandidates(foods, pref, seed);
   const candidates = toNearbyCandidates(ranked, streets, FOOD_LIMIT);
   const shown = ranked.slice(0, FOOD_LIMIT);
-  const topStreets = aggregateStreets(shown, streets, 4);
-  // 특화거리는 광주·전남에 20곳뿐이라 추천 음식 대부분은 짝이 없다. 없는 쪽은
-  // 억지로 거리를 붙이지 않고 그 음식을 파는 집으로 안내한다.
-  const shopOnly = foodsWithoutStreet(shown, streets, 3);
+  // 추천이 대표 먹거리로 내건 특화거리. 지도 위 거리 핀이자, 그 핀을 누르면
+  // 가는 상세 페이지 목록이다. 절로 따로 나열하지는 않는다.
+  const topStreets = aggregateStreets(shown, streets, 6);
   // 조건을 그대로 만족하는 음식이 없으면 목록 위에서 먼저 밝힌다. 카드마다
   // "다만 ~"으로만 흘리면 네 장을 다 펼쳐 봐야 알 수 있다.
   const notice = substitutionNotice(ranked, pref);
@@ -65,30 +63,27 @@ export default async function ResultPage({
 
   return (
     <main className="mx-auto min-h-dvh w-full max-w-[520px] bg-canvas pb-12">
-      <header className="bg-ink px-6 pb-5 pt-11 text-fg-inverse">
+      {/* 지도가 주인공이라 헤더는 얇은 앱바로 줄인다. 제목·취향은 한 줄에
+          몰아 넣고, 채점 안내 문단은 뺀다(카드에서 펼쳐 볼 수 있다). */}
+      <header className="bg-ink px-5 py-3 text-fg-inverse">
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/taste"
-            className="block w-fit text-[13px] text-[#b8afa6] transition-colors hover:text-fg-inverse"
+            className="shrink-0 text-[13px] text-[#b8afa6] transition-colors hover:text-fg-inverse"
           >
-            ← 취향 다시 고르기
+            ← 다시
           </Link>
+          <h1 className="font-display truncate text-[16px]">
+            {pref.month}월의 남도, {Math.min(ranked.length, FOOD_LIMIT)}가지
+          </h1>
           <Link
             href="/how"
-            className="shrink-0 rounded-full border border-[#4a423a] px-2.5 py-1 text-[11px] font-bold text-[#b8afa6] transition-colors hover:border-fg-inverse hover:text-fg-inverse"
+            className="shrink-0 text-[12px] font-bold text-[#b8afa6] transition-colors hover:text-fg-inverse"
           >
             추천 방식
           </Link>
         </div>
-        <h1 className="font-display mt-2 text-[26px] leading-tight">
-          {pref.month}월의 남도, {Math.min(ranked.length, FOOD_LIMIT)}가지
-        </h1>
-        <p className="mt-1.5 text-[12px] leading-relaxed text-[#b8afa6]">
-          {pref.month}월 제철 후보 {ranked.length}가지를 아래 취향으로 채점했습니다. 카드마다
-          <b className="font-bold text-fg-inverse"> ‘왜 이 음식인가요?’</b>를 펼치면 점수가
-          어떻게 나왔는지 볼 수 있습니다.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           <Chip color={SPICY_COLOR} label={`맵기 ${spicyLabel}`} />
           <Chip
             color={SOUP_COLOR}
@@ -128,110 +123,8 @@ export default async function ResultPage({
             seed={seed}
             limit={FOOD_LIMIT}
           />
-
-          {topStreets.length > 0 && (
-          <section className="px-5 pt-7">
-            <h2 className="font-display text-[20px]">가 볼 만한 특화거리</h2>
-            <p className="mt-1 text-[12px] text-fg-muted">
-              추천 음식을 <b className="font-bold text-fg">대표 먹거리로 내건</b> 거리만
-              모았습니다. 가깝다는 이유만으로는 넣지 않습니다.
-            </p>
-            <ol className="mt-3 space-y-2.5">
-              {topStreets.map((agg, index) => (
-                <li key={agg.street.id}>
-                  <Link
-                    href={`/street/${agg.street.id}?${preferenceToQuery(pref)}`}
-                    className="street-card flex items-center gap-3 rounded-2xl border-y border-r border-line bg-surface px-4 py-3.5"
-                  >
-                    <span className="font-display flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[16px] text-brand">
-                      {index + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <h3 className="font-display truncate text-[18px]">
-                          {streetDisplayName(agg.street)}
-                        </h3>
-                        {agg.street.shopCount > 0 && (
-                          <span className="shrink-0 text-[12px] text-fg-muted">
-                            점포 {agg.street.shopCount}곳
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-[12px] text-fg-muted">
-                        {agg.street.sido} {agg.street.sigungu}
-                      </p>
-                      <p className="mt-1.5 truncate text-[12px] text-accent">
-                        {agg.foods.map((f) => f.name).join(" · ")}
-                      </p>
-                    </div>
-                    <span
-                      className="street-card-arrow shrink-0 text-[20px] text-fg-muted"
-                      aria-hidden="true"
-                    >
-                      →
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ol>
-          </section>
-          )}
-
-          {shopOnly.length > 0 && (
-            <section className="px-5 pt-7">
-              <h2 className="font-display text-[20px]">파는 집으로 바로 가기</h2>
-              <p className="mt-1 text-[12px] text-fg-muted">
-                {topStreets.length > 0 ? "나머지 추천은" : "이번 추천은"} 짝이 되는 특화거리가
-                없습니다. 그 음식을 실제로 파는 집을 대신 찾았습니다.
-              </p>
-              <div className="mt-3 space-y-3">
-                {shopOnly.map((entry) => (
-                  <div
-                    key={entry.food.id}
-                    className="overflow-hidden rounded-2xl border border-line bg-surface"
-                  >
-                    <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-2.5">
-                      <h3 className="font-display truncate text-[17px]">{entry.food.name}</h3>
-                      <span className="shrink-0 text-[12px] text-fg-muted">
-                        파는 곳 {entry.food.restaurantCount}곳
-                      </span>
-                    </div>
-                    <ul className="divide-y divide-line">
-                      {entry.shops.map((shop) => (
-                        <li key={shop.id} className="flex items-center gap-3 px-4 py-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="truncate text-[14px] font-medium text-fg">
-                                {shop.name}
-                              </span>
-                              {shop.isLocalSpecialty && (
-                                <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-bold text-brand">
-                                  향토
-                                </span>
-                              )}
-                            </div>
-                            <p className="mt-0.5 truncate text-[12px] text-fg-muted">
-                              {shop.region} {shop.area}
-                            </p>
-                          </div>
-                          <a
-                            href={`https://map.kakao.com/link/search/${encodeURIComponent(
-                              shop.address || shop.name,
-                            )}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="shrink-0 text-[12px] text-accent hover:underline"
-                          >
-                            길찾기
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+          {/* '가 볼 만한 특화거리'·'파는 집' 절은 여기 없다. 거리·점포 정보는
+              지도의 거리 핀을 눌러 들어간 상세 페이지에서만 본다. */}
         </>
       )}
     </main>

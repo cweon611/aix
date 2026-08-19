@@ -27,13 +27,20 @@ const MARKER_COLOR: Record<MapMarker["kind"], string> = {
   me: ME_COLOR,
 };
 
-function buildDivIcon(leaflet: typeof L, color: string, size: number): L.DivIcon {
+function buildDivIcon(
+  leaflet: typeof L,
+  color: string,
+  size: number,
+  opts: { interactive?: boolean; ring?: boolean } = {},
+): L.DivIcon {
+  const cursor = opts.interactive ? "cursor:pointer;" : "";
+  // 선택된 핀은 흰 테두리를 두껍게 하고 옅은 링을 둘러 눈에 띄게 한다.
+  const ring = opts.ring ? `box-shadow:0 0 0 4px ${color}44,0 1px 4px rgba(28,24,21,.35);` : "box-shadow:0 1px 4px rgba(28,24,21,.35);";
   return leaflet.divIcon({
     className: "region-map-dot",
     html: `<span style="
       display:block;width:${size}px;height:${size}px;border-radius:999px;
-      background:${color};border:2px solid #ffffff;
-      box-shadow:0 1px 4px rgba(28,24,21,.35);
+      background:${color};border:${opts.ring ? 3 : 2}px solid #ffffff;${ring}${cursor}
     "></span>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
@@ -58,12 +65,27 @@ function buildDivIcon(leaflet: typeof L, color: string, size: number): L.DivIcon
 export function RegionMap({
   markers,
   height = 260,
+  onSelect,
+  selectedId,
 }: {
   markers: MapMarker[];
-  height?: number;
+  height?: number | string;
+  /** 마커를 누르면 그 id를 돌려준다. 주면 마커가 클릭 가능해진다. */
+  onSelect?: (id: string) => void;
+  /** 강조해서 가운데로 옮길 마커. 선택이 바뀌어도 지도를 다시 만들지 않는다. */
+  selectedId?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  // 선택이 바뀔 때 지도를 통째로 다시 그리면 확대·중심이 초기화되고 깜빡인다.
+  // 마커를 id로 들고 있다가, 선택만 바뀌면 그 자리로 옮기고 라벨만 연다.
+  const markerRefs = useRef<Map<string, L.Marker>>(new Map());
+  const leafletRef = useRef<typeof L | null>(null);
+  // onSelect가 매 렌더 새 함수여도 지도를 다시 만들지 않게 ref로 우회한다.
+  const onSelectRef = useRef(onSelect);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  });
 
   const points = markers.filter(
     (m) => Number.isFinite(m.lat) && Number.isFinite(m.lon),
@@ -97,7 +119,9 @@ export function RegionMap({
         })
         .addTo(map);
 
+      leafletRef.current = leaflet;
       const layerGroup = leaflet.layerGroup().addTo(map);
+      markerRefs.current = new Map();
 
       // 강조 마커를 마지막에 그려 다른 점 위로 올린다.
       const ordered = [...points].sort(
@@ -106,11 +130,21 @@ export function RegionMap({
 
       for (const m of ordered) {
         const color = MARKER_COLOR[m.kind];
-        const size = m.highlight ? 20 : m.kind === "street" ? 15 : 10;
+        const size = m.highlight ? 20 : m.kind === "street" ? 15 : 12;
+        // onSelect가 있으면 내 위치를 뺀 핀은 누를 수 있다. 무엇으로 이어질지는
+        // 부르는 쪽이 정한다(지금은 특화거리 핀 → 거리 상세).
+        const clickable = Boolean(onSelectRef.current) && m.kind !== "me";
         const marker = leaflet.marker([m.lat, m.lon], {
-          icon: buildDivIcon(leaflet, color, size),
+          icon: buildDivIcon(leaflet, color, size, { interactive: clickable }),
+          interactive: true,
+          keyboard: false,
         });
         marker.addTo(layerGroup);
+        markerRefs.current.set(m.id, marker);
+
+        if (clickable) {
+          marker.on("click", () => onSelectRef.current?.(m.id));
+        }
 
         if (m.highlight) {
           marker.bindTooltip(m.label, {
@@ -136,15 +170,28 @@ export function RegionMap({
       cancelled = true;
       map?.remove();
       mapRef.current = null;
+      markerRefs.current = new Map();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pointsKey가 실질적인 의존성이다.
   }, [pointsKey]);
+
+  // 선택된 핀으로 지도를 옮기고 라벨을 연다. 지도 재생성과 분리해서,
+  // 선택이 바뀌어도 확대·중심이 초기화되지 않는다.
+  useEffect(() => {
+    if (!selectedId) return;
+    const map = mapRef.current;
+    const marker = markerRefs.current.get(selectedId);
+    if (!map || !marker) return;
+    const pos = marker.getLatLng();
+    map.panTo(pos, { animate: true });
+    marker.openTooltip();
+  }, [selectedId]);
 
   if (points.length === 0) {
     return (
       <div
         className="flex items-center justify-center rounded-2xl border border-line bg-accent-soft text-sm text-fg-muted"
-        style={{ height }}
+        style={{ height: typeof height === "number" ? `${height}px` : height }}
       >
         좌표 정보가 없어 지도를 그릴 수 없습니다
       </div>
@@ -154,7 +201,7 @@ export function RegionMap({
   return (
     <div
       ref={containerRef}
-      style={{ height }}
+      style={{ height: typeof height === "number" ? `${height}px` : height }}
       // isolate: Leaflet이 내부 pane에 박아 두는 z-index(200~700)가
       // 페이지의 다른 요소와 충돌하지 않게 이 지도만의 stacking context로
       // 가둔다. 랜딩 페이지 배경 지도에서 버튼 클릭이 막힌 원인이었다.

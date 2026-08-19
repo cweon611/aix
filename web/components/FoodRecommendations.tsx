@@ -109,22 +109,11 @@ export function FoodRecommendations({
   // 위치를 못 받은 동안에는 거리순을 고를 수 없으므로 취향순으로 되돌린다.
   const activeSort: SortMode = location.status === "ready" ? sort : "취향순";
 
+  // 지도 핀은 특화거리다. 음식 정보는 아래 시트에 다 있으니, 지도는 "가서
+  // 먹을 수 있는 거리"를 보여 주고 누르면 그 거리 상세로 넘어간다. 파는 집
+  // 좌표까지 핀으로 찍으면 지도가 점으로 뒤덮여 거리 핀이 묻힌다.
   const markers = useMemo<MapMarker[]>(() => {
-    const showing =
-      activeSort === "거리순" ? byDistance.map((d) => d.candidate) : byPreference;
-
     const list: MapMarker[] = [...streetMarkers];
-    for (const candidate of showing) {
-      for (const spot of candidate.spots) {
-        list.push({
-          id: `${candidate.id}-${spot.name}-${spot.lat}`,
-          lat: spot.lat,
-          lon: spot.lon,
-          label: spot.name,
-          kind: "restaurant",
-        });
-      }
-    }
     if (location.status === "ready") {
       list.push({
         id: "me",
@@ -136,7 +125,12 @@ export function FoodRecommendations({
       });
     }
     return list;
-  }, [streetMarkers, activeSort, byDistance, byPreference, location]);
+  }, [streetMarkers, location]);
+
+  // 거리 핀을 누르면 그 거리 상세로 간다. 거리·점포 정보는 거기서만 본다.
+  const openStreet = (id: string) => {
+    router.push(`/street/${id}?${prefQuery}`);
+  };
 
   function requestLocation() {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -166,22 +160,42 @@ export function FoodRecommendations({
 
   return (
     <>
-      <section className="px-5 pt-4">
-        <h2 className="mb-2 text-[13px] font-bold text-fg-muted">추천 지점 한눈에 보기</h2>
-        <RegionMap markers={markers} height={220} />
-        <p className="mt-2 text-[11px] text-fg-muted">
-          <span className="font-bold text-brand">●</span> 특화거리 ·{" "}
-          <span className="font-bold text-accent">●</span> 실제로 파는 집
+      {/* 히어로 지도. 화면을 크게 차지해 이 화면이 지도임을 먼저 보여 준다.
+          아래 시트가 살짝 겹쳐 올라와 바텀시트처럼 읽힌다. */}
+      <section className="relative h-[56vh] w-full">
+        {streetMarkers.length > 0 ? (
+          <RegionMap markers={markers} height="100%" onSelect={openStreet} />
+        ) : (
+          // 추천 넷이 특화거리와 이어지지 않으면 찍을 핀이 없다. 빈 지도를
+          // 내미는 대신, 아래 목록으로 눈을 돌리게 한다.
+          <div className="flex h-full flex-col items-center justify-center bg-accent-soft px-8 text-center">
+            <p className="font-display text-[18px] text-fg">
+              이번 추천과 이어지는 특화거리가 없습니다
+            </p>
+            <p className="mt-2 text-[13px] leading-relaxed text-fg-muted">
+              아래에서 추천 음식을 확인하세요. ‘다른 추천 보기’를 누르면 거리가 있는
+              다른 조합이 나올 수 있습니다.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* 추천 시트. 지도 아래 모서리를 덮으며 올라온다. 위로 스크롤하면
+          지도가 밀려 나가고 추천 목록이 드러난다. */}
+      <section className="relative z-10 -mt-5 rounded-t-3xl border-t border-line bg-canvas px-5 pb-2 pt-3 shadow-[0_-10px_30px_rgba(28,24,21,0.12)]">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" aria-hidden="true" />
+        <p className="text-[11px] text-fg-muted">
+          <span className="font-bold text-brand">●</span> 특화거리 — 누르면 그 거리에서
+          파는 곳과 상세를 볼 수 있습니다.
           {location.status === "ready" && (
             <>
-              {" · "}
-              <span className="font-bold text-salty">●</span> 내 위치
+              {" "}
+              <span className="font-bold text-salty">●</span> 내 위치.
             </>
           )}
         </p>
-      </section>
 
-      <section className="px-5 pt-6">
+        <div className="pt-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-display text-[20px]">취향에 맞는 남도 음식</h2>
           <div className="flex shrink-0 gap-1.5">
@@ -297,6 +311,7 @@ export function FoodRecommendations({
                 ))}
           </ol>
         )}
+        </div>
       </section>
     </>
   );
@@ -347,6 +362,7 @@ function FoodCard({
   poolSize,
   prefQuery,
   nearby,
+  highlighted,
 }: {
   candidate: NearbyCandidate;
   rank: number;
@@ -355,9 +371,16 @@ function FoodCard({
   prefQuery: string;
   /** 거리순일 때만 넘어온다. */
   nearby?: NearbyFood;
+  /** 지도 핀에서 방금 고른 카드. 테두리를 강조하고 스크롤 여백을 준다. */
+  highlighted?: boolean;
 }) {
   return (
-    <li className="result-card rounded-2xl border border-line bg-surface px-4 py-4">
+    <li
+      id={`food-${candidate.id}`}
+      className={`result-card scroll-mt-3 rounded-2xl border bg-surface px-4 py-4 transition-colors ${
+        highlighted ? "border-accent ring-2 ring-accent/30" : "border-line"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
