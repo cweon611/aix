@@ -55,6 +55,7 @@ export function FoodRecommendations({
   streetMarkers,
   pref,
   prefQuery,
+  seed,
   limit = 4,
 }: {
   /** 취향순으로 이미 정렬된 제철 후보 전부. */
@@ -65,6 +66,8 @@ export function FoodRecommendations({
   pref: Preference;
   /** 특화거리 링크에 취향을 그대로 물려주기 위한 쿼리스트링. */
   prefQuery: string;
+  /** 이번 화면의 동점자 순서를 정한 씨앗. 공유 주소에 실어 결과를 고정한다. */
+  seed: string;
   limit?: number;
 }) {
   const [sort, setSort] = useState<SortMode>("취향순");
@@ -75,6 +78,26 @@ export function FoodRecommendations({
   // 스크롤 위치와 고른 정렬 모드가 남는다.
   const router = useRouter();
   const [reshuffling, startReshuffle] = useTransition();
+  const [copied, setCopied] = useState(false);
+
+  /**
+   * 씨앗까지 실은 주소를 복사한다.
+   *
+   * 이 화면은 볼 때마다 동점자를 다시 섞으므로, 주소만 보내면 상대는 다른
+   * 넷을 본다. 씨앗을 실어야 "내가 본 그 상"이 건너간다.
+   */
+  const copyLink = async () => {
+    const url = `${window.location.origin}/result?${prefQuery}&seed=${encodeURIComponent(seed)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // 클립보드가 막힌 환경(http, 권한 거부)에서는 주소창을 대신 바꿔 준다.
+      // 복사는 못 해도 사용자가 직접 긁어 갈 수 있어야 한다.
+      window.history.replaceState(null, "", url);
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
 
   const byPreference = useMemo(() => candidates.slice(0, limit), [candidates, limit]);
 
@@ -161,21 +184,40 @@ export function FoodRecommendations({
       <section className="px-5 pt-6">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-display text-[20px]">취향에 맞는 남도 음식</h2>
-          <button
-            type="button"
-            onClick={() => startReshuffle(() => router.refresh())}
-            disabled={reshuffling}
-            className="shrink-0 cursor-pointer rounded-full border border-line-strong px-3 py-1.5 text-[12px] font-bold text-fg transition-all hover:border-brand hover:text-brand disabled:cursor-wait disabled:opacity-60"
-          >
-            <span aria-hidden="true" className="mr-1">
-              🔄
-            </span>
-            {reshuffling ? "고르는 중…" : "다른 추천 보기"}
-          </button>
+          <div className="flex shrink-0 gap-1.5">
+            <button
+              type="button"
+              onClick={copyLink}
+              className="cursor-pointer rounded-full border border-line-strong px-3 py-1.5 text-[12px] font-bold text-fg transition-all hover:border-accent hover:text-accent"
+            >
+              <span aria-hidden="true" className="mr-1">
+                🔗
+              </span>
+              {copied ? "복사했습니다" : "이 추천 공유"}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                startReshuffle(() => {
+                  // 공유 링크로 들어왔다면 주소에 씨앗이 박혀 있어, 그대로
+                  // 새로고침하면 같은 넷이 다시 나온다. 씨앗을 떼고 부른다.
+                  router.replace(`/result?${prefQuery}`);
+                  router.refresh();
+                })
+              }
+              disabled={reshuffling}
+              className="cursor-pointer rounded-full border border-line-strong px-3 py-1.5 text-[12px] font-bold text-fg transition-all hover:border-brand hover:text-brand disabled:cursor-wait disabled:opacity-60"
+            >
+              <span aria-hidden="true" className="mr-1">
+                🔄
+              </span>
+              {reshuffling ? "고르는 중…" : "다른 추천 보기"}
+            </button>
+          </div>
         </div>
         <p className="mt-1 text-[12px] text-fg-muted">
-          같은 취향이라도 누를 때마다 다른 네 가지를 골라 드립니다. 점수가 같은 후보가
-          수십 가지라, 그중 무엇을 보여 줄지는 매번 새로 정합니다.
+          같은 취향이라도 누를 때마다 다른 네 가지를 골라 드립니다. 지금 이 네 가지를
+          그대로 보내고 싶으면 <b className="font-bold text-fg">‘이 추천 공유’</b>를 누르세요.
         </p>
 
         <div className="mt-3 rounded-2xl border border-line bg-surface-alt px-4 py-3.5">

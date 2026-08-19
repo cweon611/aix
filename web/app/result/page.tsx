@@ -33,8 +33,11 @@ export default async function ResultPage({
 
   // 제철 후보를 전부 취향순으로 세워 클라이언트로 넘긴다. 상위 몇 개만
   // 넘기면 "가까운 순"이 취향으로 한 번 거른 뒤의 순서가 되어 버린다.
-  // 요청마다 새 씨앗을 준다. 같은 취향으로 다시 들어와도 다른 상을 받는다.
-  const ranked = rankCandidates(foods, pref, randomSeed());
+  // 씨앗이 주소에 실려 오면 그것을 쓰고, 없으면 새로 뽑는다. 그냥 들어오면
+  // 매번 다른 상을 받고, 공유받은 링크로 들어오면 보낸 사람과 같은 상을 본다.
+  const shared = typeof query.seed === "string" ? query.seed : "";
+  const seed = shared || randomSeed();
+  const ranked = rankCandidates(foods, pref, seed);
   const candidates = toNearbyCandidates(ranked, streets, FOOD_LIMIT);
   const shown = ranked.slice(0, FOOD_LIMIT);
   const topStreets = aggregateStreets(shown, streets, 4);
@@ -122,6 +125,7 @@ export default async function ResultPage({
             streetMarkers={streetMarkers}
             pref={pref}
             prefQuery={preferenceToQuery(pref)}
+            seed={seed}
             limit={FOOD_LIMIT}
           />
 
